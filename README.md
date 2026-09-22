@@ -30,6 +30,7 @@ supabase/
     admin-employee/       → Edge Function (Deno) : création/reset des comptes employés
 legacy/
   pos-business.html      → application d'origine (référence, non utilisée en prod)
+marketing/               → app séparée : plans marketing + factures (voir marketing/README.md)
 ```
 
 Aucune étape de build : `index.html` charge `src/js/app.js` via
