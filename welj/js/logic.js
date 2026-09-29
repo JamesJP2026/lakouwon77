@@ -155,3 +155,62 @@ export function messageStatut(c, client, settings) {
   }
 }
 export const waLink = (tel, msg) => `https://wa.me/${String(tel || "").replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`;
+
+/* ---------- Acheminement : points de transit et itinéraires ----------
+   Chaque manifeste suit un itinéraire fait d'étapes (entrepôt →
+   aéroport/port de départ → escales éventuelles → aéroport/port
+   d'arrivée → mainlevée douane → succursale). Chaque étape a une date
+   prévue et une date réelle : c'est ce qui permet de contrôler les
+   retards de bout en bout, comme la « control tower » des TMS.      */
+export const TYPES_POINT = [
+  { id: "entrepot", label: "Entrepôt" },
+  { id: "aeroport", label: "Aéroport" },
+  { id: "port", label: "Port maritime" },
+  { id: "douane", label: "Douane / zone franche" },
+  { id: "autre", label: "Autre" },
+];
+export const typePoint = id => TYPES_POINT.find(t => t.id === id)?.label || id;
+
+export const ACTIONS_ETAPE = [
+  { id: "chargement", label: "Départ entrepôt / chargement", short: "Chargement", statut: "ferme" },
+  { id: "depart",     label: "Départ (décollage / appareillage)", short: "Départ", statut: "transit" },
+  { id: "escale",     label: "Escale / transbordement", short: "Escale", statut: null },
+  { id: "arrivee",    label: "Arrivée en Haïti", short: "Arrivée", statut: "douane" },
+  { id: "mainlevee",  label: "Mainlevée douane", short: "Mainlevée", statut: null },
+  { id: "succursale", label: "Réception en succursale", short: "Succursale", statut: "arrive" },
+];
+export const actionEtape = id => ACTIONS_ETAPE.find(a => a.id === id) || { id, label: id, short: id, statut: null };
+
+export const DEFAULT_POINTS = [
+  { id: "WH-FLL",   nom: "Entrepôt WELJ Fort Lauderdale", code: "WELJ-FLL", ville: "Fort Lauderdale, FL", pays: "USA", type: "entrepot" },
+  { id: "MIA",      nom: "Aéroport international de Miami", code: "MIA", ville: "Miami, FL", pays: "USA", type: "aeroport" },
+  { id: "FLL-APT",  nom: "Aéroport Fort Lauderdale-Hollywood", code: "FLL", ville: "Fort Lauderdale, FL", pays: "USA", type: "aeroport" },
+  { id: "PEV",      nom: "Port Everglades", code: "USPEF", ville: "Fort Lauderdale, FL", pays: "USA", type: "port" },
+  { id: "PMIA",     nom: "PortMiami", code: "USMIA", ville: "Miami, FL", pays: "USA", type: "port" },
+  { id: "PAP-APT",  nom: "Aéroport Toussaint Louverture", code: "PAP", ville: "Port-au-Prince", pays: "Haïti", type: "aeroport" },
+  { id: "CAP-APT",  nom: "Aéroport de Cap-Haïtien", code: "CAP", ville: "Cap-Haïtien", pays: "Haïti", type: "aeroport" },
+  { id: "PAP-PORT", nom: "Port de Port-au-Prince (APN)", code: "HTPAP", ville: "Port-au-Prince", pays: "Haïti", type: "port" },
+  { id: "LAFITO",   nom: "Port Lafito", code: "HTLAF", ville: "Lafito", pays: "Haïti", type: "port" },
+  { id: "CAP-PORT", nom: "Port de Cap-Haïtien", code: "HTCAP", ville: "Cap-Haïtien", pays: "Haïti", type: "port" },
+];
+
+/** Itinéraire type selon le mode et la succursale de destination. Décalages en jours depuis le départ. */
+export function itineraireType(mode, destination, dateDepart) {
+  const d0 = new Date(dateDepart || Date.now()).getTime();
+  const at = j => new Date(d0 + j * 86400000).toISOString();
+  const nord = destination === "CAP";
+  const route = mode === "mer"
+    ? [["WH-FLL", "chargement", -2], ["PEV", "depart", 0], [nord ? "CAP-PORT" : "PAP-PORT", "arrivee", 5], [nord ? "CAP-PORT" : "PAP-PORT", "mainlevee", 9], [destination, "succursale", destination === "JER" ? 12 : 11]]
+    : [["WH-FLL", "chargement", -1], ["MIA", "depart", 0], [nord ? "CAP-APT" : "PAP-APT", "arrivee", 0.2], [nord ? "CAP-APT" : "PAP-APT", "mainlevee", 1], [destination, "succursale", destination === "JER" ? 3 : 2]];
+  return route.map(([pointId, action, j], i) => ({ id: "e" + i + Math.random().toString(36).slice(2, 7), pointId, action, prevu: at(j), reel: null, note: "" }));
+}
+/** Marque comme réalisées les étapes cohérentes avec un statut de manifeste (données existantes / démo). */
+export function etapesPourStatut(etapes, statutM) {
+  const faits = { ouvert: [], ferme: ["chargement"], transit: ["chargement", "depart"], douane: ["chargement", "depart", "escale", "arrivee"], arrive: ACTIONS_ETAPE.map(a => a.id) }[statutM] || [];
+  etapes.forEach(e => { if (faits.includes(e.action)) e.reel = e.prevu; });
+  return etapes;
+}
+/** Retard (en jours, > 0) d'une étape non réalisée dont la date prévue est dépassée. */
+export const retardEtape = e => !e.reel && e.prevu && Date.now() > new Date(e.prevu).getTime() + 3600000 ? (Date.now() - new Date(e.prevu).getTime()) / 86400000 : 0;
+/** Écart (jours) entre réalisé et prévu : > 0 = en retard. */
+export const ecartEtape = e => e.reel && e.prevu ? (new Date(e.reel) - new Date(e.prevu)) / 86400000 : 0;

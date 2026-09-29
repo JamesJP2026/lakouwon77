@@ -5,7 +5,7 @@
    valeurs d'exemple : à remplacer dans Paramètres par la
    grille officielle de la compagnie.
 ========================================================= */
-import { numeroTracking, numeroManifeste, codeClient, numeroRecu, calculerFacture } from "./logic.js";
+import { numeroTracking, numeroManifeste, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut } from "./logic.js";
 
 export function defaultSettings() {
   return {
@@ -28,6 +28,7 @@ export function defaultSettings() {
       { id: "maritime", nom: "Maritime", mode: "mer", unite: "pi3", prix: 14, minimum: 35, delai: "3–4 semaines" },
     ],
     frais: { manutention: 2, assurancePct: 3, seuilDouane: 200, douanePct: 10, livraison: 7 },
+    pointsTransit: DEFAULT_POINTS.map(p => ({ ...p })),
     succursales: [
       { id: "FLL", nom: "Entrepôt Fort Lauderdale", ville: "Fort Lauderdale, FL", type: "origine", telephone: "+1 786 350 7565" },
       { id: "PAP", nom: "Delmas 95 (siège)", ville: "Port-au-Prince", type: "destination", telephone: "+509 38 34 7343" },
@@ -47,7 +48,7 @@ const USERS = [
 export function seedData({ empty = false } = {}) {
   const settings = defaultSettings();
   const db = {
-    version: 1, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
+    version: 2, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
     seq: { client: 0, colis: 0, manifeste: 0, recu: 0 },
     clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [],
   };
@@ -84,26 +85,35 @@ export function seedData({ empty = false } = {}) {
   ];
   const fournisseurs = ["TBA", "1Z", "9400", "SHEIN", "7849"];
 
-  // Manifestes : 1 arrivé, 1 en douane, 1 en transit, 1 ouvert
+  // Manifestes : arrivé, en douane (maritime), en transit, ouvert, et un maritime en retard vers le Cap
   const manifs = [
-    { mode: "air", statut: "arrive", dep: 20, eta: 17, transporteur: "Amerijet", dest: "PAP" },
-    { mode: "mer", statut: "douane", dep: 25, eta: 3, transporteur: "Crowley", dest: "PAP" },
-    { mode: "air", statut: "transit", dep: 1, eta: -2, transporteur: "Amerijet", dest: "PAP" },
-    { mode: "air", statut: "ouvert", dep: -3, eta: -6, transporteur: "Amerijet", dest: "PAP" },
+    { mode: "air", statut: "arrive", dep: 20, transporteur: "Amerijet", vol: "M6 1403", dest: "PAP" },
+    { mode: "mer", statut: "douane", dep: 8, transporteur: "Crowley", navire: "Crowley Tiscortes — V.2536S", conteneur: "CMCU 481220-7", dest: "PAP" },
+    { mode: "air", statut: "transit", dep: 0.1, transporteur: "Amerijet", vol: "M6 1411", dest: "PAP" },
+    { mode: "air", statut: "ouvert", dep: -3, transporteur: "Amerijet", vol: "M6 1419", dest: "PAP" },
+    { mode: "mer", statut: "transit", dep: 7, transporteur: "Seaboard Marine", navire: "Seaboard Pride — V.118", conteneur: "SMLU 772031-4", dest: "CAP", retard: true },
   ];
   for (const m of manifs) {
     const seq = ++db.seq.manifeste;
-    db.manifestes.push({
-      id: "m" + seq, numero: numeroManifeste(seq, m.mode, new Date(now - m.dep * day)), mode: m.mode,
+    const depart = ago(m.dep);
+    const etapes = etapesPourStatut(itineraireType(m.mode, m.dest, depart), m.statut);
+    // Écarts réalistes sur les étapes réalisées (quelques heures d'avance / de retard)
+    etapes.forEach(e => { if (e.reel) e.reel = new Date(new Date(e.reel).getTime() + (rnd() - .4) * 8 * 3600000).toISOString(); });
+    if (m.retard) etapes.find(e => e.action === "arrivee").note = "Navire retenu au port de Miami (météo)";
+    const man = {
+      id: "m" + seq, numero: numeroManifeste(seq, m.mode, new Date(depart)), mode: m.mode,
       transporteur: m.transporteur, reference: (m.mode === "mer" ? "BL-" : "AWB 810-") + Math.floor(rnd() * 9e7 + 1e7),
-      origine: "FLL", destination: m.dest, dateDepart: ago(m.dep), eta: ago(m.eta), statut: m.statut,
-      notes: "", createdAt: ago(m.dep + 4),
-    });
+      vol: m.vol || "", navire: m.navire || "", conteneur: m.conteneur || "",
+      origine: "FLL", destination: m.dest, statut: m.statut, etapes, notes: "", createdAt: ago(m.dep + 4),
+    };
+    syncDatesManifeste(man);
+    db.manifestes.push(man);
   }
 
   const plan = [
     ...Array(8).fill({ st: "livre", m: 0 }), ...Array(5).fill({ st: "pret", m: 0 }), ...Array(2).fill({ st: "livraison", m: 0 }),
     ...Array(5).fill({ st: "douane", m: 1 }), ...Array(7).fill({ st: "transit", m: 2 }), ...Array(4).fill({ st: "consolide", m: 3 }),
+    ...Array(3).fill({ st: "transit", m: 4 }),
     ...Array(9).fill({ st: "recu", m: null }), { st: "probleme", m: null },
   ];
   const chain = ["recu", "consolide", "transit", "douane", "arrive", "pret", "livraison", "livre"];
@@ -152,5 +162,27 @@ export function seedData({ empty = false } = {}) {
     }
   });
   db.journal.push({ id: "j0", date: new Date().toISOString(), user: "u-admin", action: "Initialisation", details: "Données de démonstration chargées" });
+  return db;
+}
+
+/** Départ et ETA d'un manifeste déduits de son itinéraire (étapes « départ » et « arrivée »). */
+export function syncDatesManifeste(m) {
+  const e = m.etapes || [];
+  const dep = e.find(x => x.action === "depart"), arr = e.find(x => x.action === "arrivee") || e.at(-1);
+  if (dep) m.dateDepart = dep.reel || dep.prevu;
+  if (arr) m.eta = arr.reel || arr.prevu;
+  return m;
+}
+
+/** Met à niveau une base créée par une version précédente de l'application. */
+export function migrate(db) {
+  if ((db.version || 1) < 2) {
+    db.settings.pointsTransit = db.settings.pointsTransit || DEFAULT_POINTS.map(p => ({ ...p }));
+    for (const m of db.manifestes) {
+      m.vol = m.vol || ""; m.navire = m.navire || ""; m.conteneur = m.conteneur || "";
+      if (!m.etapes) { m.etapes = etapesPourStatut(itineraireType(m.mode, m.destination, m.dateDepart), m.statut); syncDatesManifeste(m); }
+    }
+    db.version = 2;
+  }
   return db;
 }

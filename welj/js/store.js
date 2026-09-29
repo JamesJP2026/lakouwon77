@@ -5,7 +5,7 @@
    données : pour passer plus tard à une base partagée (Supabase,
    comme l'app POS Lakouwon), il suffit de réécrire ce fichier.
 ========================================================= */
-import { seedData } from "./seed.js";
+import { seedData, migrate } from "./seed.js";
 
 const KEY = "welj-express-db-v1";
 let db = null;
@@ -20,6 +20,7 @@ export function load() {
     db = raw ? JSON.parse(raw) : null;
   } catch { db = null; }
   if (!db || !db.version) { db = seedData(); save(); }
+  else if (db.version < 2) { migrate(db); save(); }
   return db;
 }
 
@@ -42,7 +43,7 @@ export function exportJson() { return JSON.stringify(db, null, 2); }
 export function importJson(text) {
   const data = JSON.parse(text);
   if (!data || !data.version || !Array.isArray(data.colis)) throw new Error("Fichier de sauvegarde invalide");
-  db = data; save();
+  db = migrate(data); save();
 }
 
 /* ---------- Séquences de numérotation ---------- */

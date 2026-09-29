@@ -207,6 +207,45 @@ section.panel .vbars { margin-bottom: 22px; }
 .toast.bad { border-left-color: var(--bad); }
 .toast.out { opacity: 0; transform: translateY(8px); }
 
+/* ---------- Acheminement : itinéraire ---------- */
+.route { display: flex; align-items: flex-start; overflow-x: auto; padding: 6px 0 4px; }
+.route-node { flex: 1 0 118px; position: relative; text-align: center; padding: 0 6px; min-width: 0; }
+.route-node::before { content: ""; position: absolute; top: 12px; left: -50%; width: 100%; height: 3px; background: var(--line); }
+.route-node:first-child::before { display: none; }
+.route-node.done::before { background: var(--navy); }
+.route-node.next.from-done::before { background: linear-gradient(90deg, var(--navy), var(--orange)); }
+.route-dot { position: relative; z-index: 1; width: 26px; height: 26px; margin: 0 auto 6px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card); border: 3px solid var(--line); font-size: 12px; font-weight: 800; color: var(--ink-soft); }
+.route-node.done .route-dot { background: var(--navy); border-color: var(--navy); color: #fff; }
+.route-node.next .route-dot { border-color: var(--orange); color: var(--ink); box-shadow: 0 0 0 4px var(--orange-soft); }
+.route-node.late .route-dot { border-color: var(--bad); background: var(--bad-bg); color: var(--bad); box-shadow: none; }
+.route-code { font: 800 13px "Manrope", sans-serif; }
+.route-name { font-size: 11.5px; color: var(--ink-soft); line-height: 1.25; margin-top: 1px; }
+.route-act { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--info); margin-top: 3px; }
+.route-date { font-size: 11.5px; margin-top: 2px; }
+.route-flag { font-size: 11px; font-weight: 700; margin-top: 2px; }
+.route-flag.bad { color: var(--bad); }
+.route.compact .route-node { flex-basis: 96px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
+.seg button { border: none; background: none; padding: 7px 13px; font-weight: 600; color: var(--ink-soft); border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: none; }
+.seg button.active { background: var(--navy); color: #fff; }
+.section-title { font-size: 16px; margin: 6px 0 10px; }
+.envoi { border-left: 4px solid var(--navy); }
+.envoi.is-late { border-left-color: var(--bad); }
+.envoi .mode-ic { font-size: 18px; }
+.big-link { font-size: 15px; font-weight: 700; }
+.envoi-foot { margin-top: 10px; flex-wrap: wrap; }
+.cal-day { display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eef1f5; }
+.cal-day:last-child { border-bottom: none; }
+.cal-date { font-weight: 700; font-size: 12.5px; text-transform: capitalize; }
+.cal-day.past .cal-date { color: var(--bad); }
+.cal-day.today .cal-date { color: var(--orange); }
+.cal-day .plain li { padding: 3px 0; border: none; }
+li.click { cursor: pointer; }
+li.click:hover { background: #f6f8fc; }
+.nowrap { white-space: nowrap; }
+
 /* ---------- Mobile ---------- */
 @media (max-width: 960px) {
   #app { flex-direction: column; }
@@ -226,6 +265,7 @@ section.panel .vbars { margin-bottom: 22px; }
   .pay-modes { grid-template-columns: 1fr 1fr; }
   .dl { grid-template-columns: 1fr; }
   .dl dt { margin-top: 6px; }
+  .cal-day { grid-template-columns: 1fr; gap: 2px; }
 }
 
 /* ---------- Impression ---------- */

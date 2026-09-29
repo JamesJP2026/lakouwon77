@@ -16,8 +16,8 @@ cd welj
 python3 -m http.server 8080     # ou : npx serve .
 ```
 Ouvrez <http://localhost:8080>. Des **données de démonstration** sont
-chargées au premier lancement (18 clients, 41 colis à toutes les étapes,
-4 manifestes). Paramètres → *Tout effacer* pour démarrer à vide.
+chargées au premier lancement (18 clients, 44 colis à toutes les étapes,
+5 envois aériens et maritimes, dont un en retard). Paramètres → *Tout effacer* pour démarrer à vide.
 
 ## Inspiration : les meilleurs logiciels du secteur
 
@@ -32,16 +32,17 @@ chargées au premier lancement (18 clients, 41 colis à toutes les étapes,
 
 | Module | Rôle |
 |---|---|
+| **Acheminement USA → Haïti** | Tour de contrôle globale : chaque envoi (avion ✈ ou bateau ⛴) avec son itinéraire point par point — entrepôt, aéroport/port de départ, escales, aéroport/port d'arrivée, mainlevée douane, succursale — dates **prévues et réelles**, retards, ponctualité, calendrier des mouvements sur 3 semaines, et « où sont les envois en ce moment » par point de transit |
 | **Tableau de bord** | KPIs (entrepôt, en route, à remettre, livrés, encaissé, impayés), pipeline par statut, encaissements hebdomadaires, manifestes actifs, alertes |
 | **Réception entrepôt** | Saisie du colis (client, n° fournisseur, poids, dimensions, valeur, service, destination), **devis instantané** (poids volumétrique, assurance, douane), impression de l'étiquette 4×6 avec code-barres |
 | **Colis** | Recherche (n° WELJ, n° fournisseur, client, contenu), filtres, fiche détaillée : historique, facture, paiements, notifications, changement de statut contrôlé |
-| **Manifestes / Envois** | Création d'un envoi aérien (AWB) ou maritime (BL/conteneur), ajout des colis compatibles de l'entrepôt, **mise à jour en masse** de tous les colis quand le manifeste avance (fermé → transit → douane → arrivé), impression du manifeste |
+| **Manifestes / Envois** | Création d'un envoi aérien (AWB, n° de vol) ou maritime (BL, navire/voyage, conteneur) avec son **itinéraire type**, ajout d'escales, report des dates, ajout des colis compatibles de l'entrepôt. **Valider une étape** enregistre sa date réelle, fait avancer le manifeste et ajoute le point de transit à l'historique de tous ses colis. Impression du manifeste avec l'itinéraire |
 | **Retrait & livraison** | Scan du code-barres au comptoir, files « à trier / prêts / en livraison / remis aujourd'hui », affectation d'un livreur, remise avec nom et pièce d'identité (bloquée si solde impayé, sauf admin) |
 | **Clients** | Fiche client avec code `WELJ-0001`, adresse Miami personnalisée, historique des colis, solde, relevé de compte imprimable |
 | **Caisse & paiements** | Encaissement USD / HTG / MonCash / NatCash / carte / virement avec conversion au taux du jour, reçus numérotés, totaux par méthode, soldes à recouvrer |
 | **Suivi** | Vue « client » d'un colis : barre de progression et historique |
 | **Rapports** | CA mensuel sur 6 mois, ventilation par service, destination et catégorie, délai moyen, journal d'activité, exports CSV |
-| **Paramètres** | Coordonnées, **grille tarifaire**, frais, taux USD→HTG, succursales, utilisateurs et rôles, sauvegarde/restauration JSON |
+| **Paramètres** | Coordonnées, **grille tarifaire**, **points de transit** (aéroports, ports, entrepôts), frais, taux USD→HTG, succursales, utilisateurs et rôles, sauvegarde/restauration JSON |
 
 ### Cycle de vie d'un colis
 
@@ -51,6 +52,20 @@ Reçu à l'entrepôt → Consolidé (manifeste) → En transit → En dédouanem
                                           └→ En livraison → Livré
 (à tout moment : Exception / bloqué)
 ```
+
+### Itinéraires types
+
+| Mode | Étapes (jours par rapport au départ) |
+|---|---|
+| ✈ Aérien | Chargement entrepôt Fort Lauderdale (J-1) → Départ Miami MIA (J0) → Arrivée PAP ou CAP (J0) → Mainlevée douane (J+1) → Succursale (J+2, Jérémie J+3) |
+| ⛴ Maritime | Chargement entrepôt (J-2) → Départ Port Everglades (J0) → Arrivée port de Port-au-Prince ou Cap-Haïtien (J+5) → Mainlevée douane (J+9) → Succursale (J+11, Jérémie J+12) |
+
+Chaque étape est modifiable (point, date, note) et on peut insérer des
+escales ou transbordements. Les points de transit fournis (MIA, FLL,
+Port Everglades, PortMiami, Toussaint Louverture, Cap-Haïtien, port de
+Port-au-Prince, Lafito…) se complètent dans Paramètres. Une étape non
+validée après sa date prévue est signalée **en retard** partout (tableau de
+bord, acheminement, manifeste).
 
 ### Rôles
 

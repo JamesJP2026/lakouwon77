@@ -7,19 +7,22 @@ import * as store from "./store.js";
 import {
   STATUTS, statut, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode,
   CATEGORIES, calculerFacture, poidsVolumetrique, round, money, htg, num, fdate, fdatetime,
-  numeroTracking, numeroManifeste, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink,
+  numeroTracking, numeroManifeste, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER,
+  TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,
 } from "./logic.js";
+import { syncDatesManifeste } from "./seed.js";
 import { esc, $, $$, openModal, closeModal, confirmBox, toast, formData, opt, printHtml, downloadCsv, download } from "./ui.js";
 
 /* ---------- Rôles & navigation ---------- */
 const ROLES = {
-  admin:    { label: "Administrateur",      pages: ["dashboard", "reception", "colis", "manifestes", "comptoir", "clients", "caisse", "suivi", "rapports", "parametres"] },
-  entrepot: { label: "Agent entrepôt Miami", pages: ["dashboard", "reception", "colis", "manifestes", "clients", "suivi"] },
-  comptoir: { label: "Agent comptoir Haïti", pages: ["dashboard", "colis", "comptoir", "clients", "caisse", "suivi"] },
+  admin:    { label: "Administrateur",      pages: ["dashboard", "acheminement", "reception", "colis", "manifestes", "comptoir", "clients", "caisse", "suivi", "rapports", "parametres"] },
+  entrepot: { label: "Agent entrepôt Miami", pages: ["dashboard", "acheminement", "reception", "colis", "manifestes", "clients", "suivi"] },
+  comptoir: { label: "Agent comptoir Haïti", pages: ["dashboard", "acheminement", "colis", "comptoir", "clients", "caisse", "suivi"] },
   livreur:  { label: "Livreur",             pages: ["comptoir", "suivi"] },
 };
 const NAV = [
   { id: "dashboard",  label: "Tableau de bord",      ic: "▦" },
+  { id: "acheminement", label: "Acheminement USA → Haïti", ic: "⇄" },
   { id: "reception",  label: "Réception entrepôt",   ic: "⇲" },
   { id: "colis",      label: "Colis",                ic: "▣" },
   { id: "manifestes", label: "Manifestes / Envois",  ic: "✈" },
@@ -53,6 +56,18 @@ const lastEventDate = c => c.events.at(-1)?.date || c.createdAt;
 const dayKey = (d = new Date()) => { d = new Date(d); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const monthKey = d => dayKey(d).slice(0, 7);
 
+const pointOf = id => S().pointsTransit.find(p => p.id === id)
+  || (branch(id) && { id, nom: branch(id).nom, code: id, ville: branch(id).ville, pays: branch(id).type === "origine" ? "USA" : "Haïti", type: "succursale" })
+  || { id, nom: id, code: id, ville: "", pays: "", type: "autre" };
+const modeIc = mode => mode === "mer" ? "⛴" : "✈";
+const modeLabel = mode => mode === "mer" ? "Maritime" : "Aérien";
+const prochaineEtape = m => (m.etapes || []).find(e => !e.reel);
+const retardManifeste = m => Math.max(0, ...(m.etapes || []).map(retardEtape));
+const derniereEtape = m => [...(m.etapes || [])].reverse().find(e => e.reel);
+const enCours = m => (m.etapes || []).some(e => !e.reel);
+/** Valeur pour <input type="datetime-local"> au fuseau local. */
+const dtLocal = iso => { if (!iso) return ""; const d = new Date(iso); return `${dayKey(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+const joursTxt = j => `${num(Math.abs(j), 1)} j`;
 const badge = id => { const s = statut(id); return `<span class="badge tone-${s.tone}">${esc(s.label)}</span>`; };
 const badgeM = id => { const s = statutManifeste(id); return `<span class="badge tone-${s.tone}">${esc(s.label)}</span>`; };
 const clientLabel = c => c ? `${c.code} — ${c.nom}` : "—";
@@ -61,9 +76,19 @@ function log(action, details) {
   db.journal.unshift({ id: store.uid(), date: store.nowIso(), user: me().id, action, details });
   db.journal.length = Math.min(db.journal.length, 500);
 }
-function addEvent(c, st, note = "", lieu) {
+function addEvent(c, st, note = "", lieu, date) {
   c.statut = st;
-  c.events.push({ date: store.nowIso(), statut: st, lieu: lieu || (["recu", "consolide", "transit"].includes(st) ? "Fort Lauderdale" : branch(c.destination)?.ville || ""), note, user: me().id });
+  c.events.push({ date: date || store.nowIso(), statut: st, lieu: lieu || (["recu", "consolide", "transit"].includes(st) ? "Fort Lauderdale" : branch(c.destination)?.ville || ""), note, user: me().id });
+}
+
+/** Fait avancer un manifeste et propage le nouveau statut à ses colis (jamais de retour en arrière). */
+function setManifesteStatut(m, st, { note = "", lieu, date } = {}) {
+  const cur = STATUTS_MANIFESTE.findIndex(s => s.id === m.statut), nxt = STATUTS_MANIFESTE.findIndex(s => s.id === st);
+  if (nxt <= cur) return [];
+  m.statut = st;
+  const cst = MANIFESTE_TO_COLIS[st];
+  return db.colis.filter(c => c.manifesteId === m.id && cst && c.statut !== "probleme" && STATUT_ORDER[c.statut] < STATUT_ORDER[cst])
+    .map(c => { addEvent(c, cst, note || `Manifeste ${m.numero}`, lieu, date); return c.id; });
 }
 
 /* ---------- État d'interface (filtres par page) ---------- */
@@ -71,6 +96,7 @@ const ui = {
   colis: { q: "", statut: "", dest: "" },
   clients: { q: "" },
   manifestes: { statut: "" },
+  acheminement: { mode: "", vue: "encours" },
   comptoir: { tab: "pret", branche: "" },
   caisse: { du: dayKey(), au: dayKey() },
   rapports: { mois: monthKey(new Date()) },
@@ -167,6 +193,34 @@ function vbars(items, fmtv = v => v) {
     </div>`).join("")}</div>`;
 }
 
+/* ---------- Itinéraire visuel d'un envoi ---------- */
+function routeStrip(m, { compact = false } = {}) {
+  const et = m.etapes || [];
+  if (!et.length) return empty("Aucun itinéraire défini.");
+  const next = prochaineEtape(m);
+  return `<div class="route ${compact ? "compact" : ""}" role="list" aria-label="Itinéraire ${esc(m.numero)}">${et.map((e, i) => {
+    const p = pointOf(e.pointId); const a = actionEtape(e.action);
+    const late = retardEtape(e); const ecart = ecartEtape(e);
+    const cls = e.reel ? "done" : e === next ? (late ? "next late" : "next") : late ? "late" : "";
+    const ic = e.reel ? "✓" : e.action === "depart" ? modeIc(m.mode) : i + 1;
+    return `<div class="route-node ${cls} ${i > 0 && et[i - 1].reel ? "from-done" : ""}" role="listitem"
+      title="${esc(a.label)} — ${esc(p.nom)}${e.note ? " — " + esc(e.note) : ""}">
+      <span class="route-dot" aria-hidden="true">${ic}</span>
+      <div class="route-code">${esc(p.code || p.id)}</div>
+      ${compact ? "" : `<div class="route-name">${esc(p.nom)}</div>`}
+      <div class="route-act">${esc(a.short)}</div>
+      <div class="route-date">${e.reel ? fdatetime(e.reel) : `<span class="muted">prévu</span> ${fdatetime(e.prevu)}`}</div>
+      ${e.reel && ecart > 0.5 ? `<div class="route-flag bad">+${joursTxt(ecart)}</div>` : ""}
+      ${late ? `<div class="route-flag bad">Retard ${joursTxt(late)}</div>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+}
+function badgeRetard(m) {
+  const r = retardManifeste(m);
+  return r ? `<span class="badge tone-bad">⚠ Retard ${joursTxt(r)}</span>` : enCours(m) && m.statut !== "ouvert" ? `<span class="badge tone-good">À l'heure</span>` : "";
+}
+const transportInfo = m => [m.mode === "mer" ? m.navire : m.vol, m.conteneur ? "Cont. " + m.conteneur : ""].filter(Boolean).join(" · ");
+
 /* =========================================================
    VUES
 ========================================================= */
@@ -186,6 +240,7 @@ VIEWS.dashboard = () => {
   const totalImpaye = impayes.reduce((s, c) => s + soldeColis(c), 0);
   const exceptions = by(["probleme"]);
   const stockage = C.filter(c => c.statut === "pret" && daysAgo(lastEventDate(c)) > 7);
+  const envoisRetard = db.manifestes.filter(m => retardManifeste(m) > 0);
 
   // Encaissements par semaine (8 semaines)
   const weeks = [];
@@ -201,7 +256,7 @@ VIEWS.dashboard = () => {
     can("reception") ? `<a class="btn btn-primary" href="#/reception">+ Réceptionner un colis</a>` : "")}
   <div class="kpi-row">
     ${kpi("À l'entrepôt Miami", entrepot.length, `${num(entrepot.reduce((s, c) => s + +c.poids, 0))} lb à expédier`)}
-    ${kpi("En route / douane", route.length, `${db.manifestes.filter(m => ["transit", "douane"].includes(m.statut)).length} manifeste(s)`)}
+    ${kpi("En route / douane", route.length, `${db.manifestes.filter(m => ["transit", "douane"].includes(m.statut)).length} envoi(s), ${envoisRetard.length} en retard`, envoisRetard.length ? "bad" : "")}
     ${kpi("À remettre en Haïti", aRemettre.length, `${stockage.length} en attente > 7 jours`, stockage.length ? "warn" : "")}
     ${kpi("Livrés (30 j)", livres30.length)}
     ${kpi("Encaissé (30 j)", money(enc30), htg(enc30 * S().tauxChange), "good")}
@@ -224,15 +279,106 @@ VIEWS.dashboard = () => {
       <div class="panel-head"><h3>Manifestes actifs</h3><a href="#/manifestes" class="link">Tout voir →</a></div>
       ${actifs.length ? `<table class="tbl"><thead><tr><th>N°</th><th>Mode</th><th>Colis</th><th>ETA</th><th>Statut</th></tr></thead><tbody>
         ${actifs.map(m => `<tr class="click" data-href="manifestes/${m.id}"><td class="mono">${esc(m.numero)}</td><td>${m.mode === "mer" ? "Maritime" : "Aérien"}</td>
-        <td class="num">${db.colis.filter(c => c.manifesteId === m.id).length}</td><td>${fdate(m.eta)}</td><td>${badgeM(m.statut)}</td></tr>`).join("")}
+        <td class="num">${db.colis.filter(c => c.manifesteId === m.id).length}</td><td>${fdate(m.eta)}</td><td>${badgeM(m.statut)} ${retardManifeste(m) ? badgeRetard(m) : ""}</td></tr>`).join("")}
       </tbody></table>` : empty("Aucun manifeste actif.")}
     </section>
     <section class="panel">
       <h3>Alertes</h3>
-      ${exceptions.length || stockage.length ? `<ul class="alerts">
+      ${exceptions.length || stockage.length || envoisRetard.length ? `<ul class="alerts">
+        ${envoisRetard.map(m => { const e = (m.etapes || []).find(x => retardEtape(x)); return `<li class="alert bad" data-href="manifestes/${m.id}"><b>Retard ${modeIc(m.mode)}</b> ${esc(m.numero)} — ${esc(actionEtape(e.action).short)} à ${esc(pointOf(e.pointId).nom)} prévu le ${fdate(e.prevu)} (${joursTxt(retardEtape(e))})</li>`; }).join("")}
         ${exceptions.map(c => `<li class="alert bad" data-href="colis/${c.id}"><b>Exception</b> ${esc(c.tracking)} — ${esc(c.notes || "à vérifier")}</li>`).join("")}
         ${stockage.map(c => `<li class="alert warn" data-href="colis/${c.id}"><b>Stockage</b> ${esc(c.tracking)} prêt depuis ${Math.floor(daysAgo(lastEventDate(c)))} jours — ${esc(clientOf(c.clientId)?.nom || "")}</li>`).join("")}
       </ul>` : empty("Aucune alerte. Tout roule !")}
+    </section>
+  </div>`;
+};
+
+/* ---------- Acheminement USA → Haïti (tour de contrôle) ---------- */
+VIEWS.acheminement = () => {
+  const f = ui.acheminement;
+  const tous = db.manifestes.filter(m => !f.mode || m.mode === f.mode);
+  const actifs = tous.filter(m => enCours(m));
+  const list = (f.vue === "encours" ? actifs : f.vue === "termines" ? tous.filter(m => !enCours(m)) : tous)
+    .sort((a, b) => (retardManifeste(b) - retardManifeste(a)) || String(prochaineEtape(a)?.prevu || a.eta).localeCompare(String(prochaineEtape(b)?.prevu || b.eta)));
+  const colisDe = m => db.colis.filter(c => c.manifesteId === m.id);
+  const enRoute = actifs.filter(m => m.statut !== "ouvert");
+  const retards = actifs.filter(m => retardManifeste(m) > 0);
+  const semaine = Date.now() + 7 * 86400000;
+  const arriveesSemaine = actifs.filter(m => { const a = m.etapes.find(e => e.action === "arrivee"); return a && !a.reel && new Date(a.prevu).getTime() < semaine; });
+  // Ponctualité : étapes réalisées ces 60 derniers jours avec moins de 12 h d'écart
+  const faites = tous.flatMap(m => m.etapes.filter(e => e.reel && daysAgo(e.reel) <= 60));
+  const ponctu = faites.length ? Math.round(faites.filter(e => ecartEtape(e) <= 0.5).length / faites.length * 100) : null;
+
+  // Calendrier des mouvements à venir (et en retard)
+  const mouvements = actifs.flatMap(m => m.etapes.filter(e => !e.reel).map(e => ({ m, e })))
+    .filter(x => new Date(x.e.prevu).getTime() < Date.now() + 21 * 86400000)
+    .sort((a, b) => a.e.prevu.localeCompare(b.e.prevu));
+  const parJour = new Map();
+  mouvements.forEach(x => { const k = dayKey(x.e.prevu); if (!parJour.has(k)) parJour.set(k, []); parJour.get(k).push(x); });
+
+  // Où se trouvent les envois en ce moment : dernier point validé
+  const presence = new Map();
+  actifs.forEach(m => {
+    const d = derniereEtape(m); const key = d ? d.pointId : "WH-FLL";
+    const g = presence.get(key) || { envois: [], colis: 0, lb: 0 };
+    const cs = colisDe(m); g.envois.push(m); g.colis += cs.length; g.lb += cs.reduce((s, c) => s + +c.poids, 0);
+    presence.set(key, g);
+  });
+  const entrepotSeul = db.colis.filter(c => c.statut === "recu" && !c.manifesteId);
+
+  const seg = (key, items) => `<div class="seg">${items.map(([id, label]) => `<button class="${f[key] === id ? "active" : ""}" data-act="ach-${key}" data-id="${id}">${label}</button>`).join("")}</div>`;
+  return `
+  ${topbar("Acheminement USA → Haïti", "Contrôle global des envois par avion et par bateau : dates prévues et réelles à chaque point de transit",
+    can("manifestes") ? `<button class="btn btn-primary" data-act="new-manifeste">+ Nouvel envoi</button>` : "")}
+  <div class="filters">
+    ${seg("mode", [["", "Tous"], ["air", "✈ Aérien"], ["mer", "⛴ Maritime"]])}
+    ${seg("vue", [["encours", "En cours"], ["termines", "Terminés"], ["tous", "Tous"]])}
+  </div>
+  <div class="kpi-row">
+    ${kpi("Envois en cours", actifs.length, `✈ ${actifs.filter(m => m.mode === "air").length} · ⛴ ${actifs.filter(m => m.mode === "mer").length}`)}
+    ${kpi("Colis en route", enRoute.reduce((s, m) => s + colisDe(m).length, 0), `${num(enRoute.reduce((s, m) => s + colisDe(m).reduce((t, c) => t + +c.poids, 0), 0))} lb`)}
+    ${kpi("Envois en retard", retards.length, retards.length ? "à traiter en priorité" : "aucun retard", retards.length ? "bad" : "good")}
+    ${kpi("Arrivées en Haïti (7 j)", arriveesSemaine.length, `${arriveesSemaine.reduce((s, m) => s + colisDe(m).length, 0)} colis attendus`)}
+    ${kpi("Ponctualité (60 j)", ponctu === null ? "—" : ponctu + " %", `${faites.length} étapes réalisées`, ponctu !== null && ponctu < 80 ? "warn" : "")}
+    ${kpi("En attente à l'entrepôt", entrepotSeul.length, "colis sans manifeste")}
+  </div>
+
+  <h2 class="section-title">Envois ${f.vue === "encours" ? "en cours" : f.vue === "termines" ? "terminés" : ""} (${list.length})</h2>
+  ${list.length ? list.map(m => { const cs = colisDe(m); const nx = prochaineEtape(m); return `
+    <section class="panel envoi ${retardManifeste(m) ? "is-late" : ""}">
+      <div class="panel-head">
+        <div><span class="mode-ic" aria-hidden="true">${modeIc(m.mode)}</span> <a class="mono big-link" href="#/manifestes/${m.id}">${esc(m.numero)}</a>
+          <span class="muted"> ${esc(m.transporteur)}${transportInfo(m) ? " · " + esc(transportInfo(m)) : ""} · ${esc(m.reference)}</span></div>
+        <div class="row-inline">${badgeM(m.statut)} ${badgeRetard(m)}</div>
+      </div>
+      ${routeStrip(m)}
+      <div class="row-between envoi-foot">
+        <span class="muted small">${cs.length} colis · ${num(cs.reduce((s, c) => s + +c.poids, 0))} lb · destination ${esc(branch(m.destination)?.nom || m.destination)}${nx ? ` · prochaine étape : <b>${esc(actionEtape(nx.action).short)}</b> à ${esc(pointOf(nx.pointId).nom)}, ${fdatetime(nx.prevu)}` : " · itinéraire terminé"}</span>
+        ${nx && can("manifestes") ? `<button class="btn btn-sm btn-primary" data-act="etape-valider" data-id="${m.id}" data-etape="${nx.id}" ${!cs.length ? "disabled title='Aucun colis dans cet envoi'" : ""}>Valider : ${esc(actionEtape(nx.action).short)}</button>` : ""}
+      </div>
+    </section>`; }).join("") : empty("Aucun envoi.")}
+
+  <div class="grid-2">
+    <section class="panel">
+      <h3>Calendrier des mouvements (3 semaines)</h3>
+      <p class="muted small">Départs, arrivées, dédouanements et réceptions prévus — les retards apparaissent en premier.</p>
+      ${parJour.size ? [...parJour.entries()].map(([k, xs]) => `
+        <div class="cal-day ${k < dayKey() ? "past" : k === dayKey() ? "today" : ""}">
+          <div class="cal-date">${k === dayKey() ? "Aujourd'hui" : new Date(k + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })}</div>
+          <ul class="plain">${xs.map(({ m, e }) => `<li class="click" data-href="manifestes/${m.id}">
+            <span class="mono small">${new Date(e.prevu).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+            ${modeIc(m.mode)} <b>${esc(actionEtape(e.action).short)}</b> — ${esc(pointOf(e.pointId).nom)} <span class="mono muted">${esc(m.numero)}</span>
+            ${retardEtape(e) ? `<span class="badge tone-bad">Retard ${joursTxt(retardEtape(e))}</span>` : ""}</li>`).join("")}</ul>
+        </div>`).join("") : empty("Aucun mouvement prévu.")}
+    </section>
+    <section class="panel">
+      <h3>Où sont les envois en ce moment ?</h3>
+      <p class="muted small">Dernier point de transit validé pour chaque envoi en cours.</p>
+      <table class="tbl"><thead><tr><th>Point de transit</th><th>Pays</th><th class="r">Envois</th><th class="r">Colis</th><th class="r">Poids</th></tr></thead><tbody>
+        ${entrepotSeul.length ? `<tr><td>Entrepôt WELJ — colis non consolidés</td><td>USA</td><td class="r">—</td><td class="num r">${entrepotSeul.length}</td><td class="num r">${num(entrepotSeul.reduce((s, c) => s + +c.poids, 0))} lb</td></tr>` : ""}
+        ${[...presence.entries()].map(([pid, g]) => { const p = pointOf(pid); return `<tr><td><b>${esc(p.nom)}</b> <span class="mono muted">${esc(p.code || "")}</span><div class="small">${g.envois.map(m => `<a class="mono" href="#/manifestes/${m.id}">${modeIc(m.mode)} ${esc(m.numero)}</a>`).join(" · ")}</div></td>
+          <td>${esc(p.pays || "")}</td><td class="num r">${g.envois.length}</td><td class="num r">${g.colis}</td><td class="num r">${num(g.lb)} lb</td></tr>`; }).join("")}
+      </tbody></table>
     </section>
   </div>`;
 };
@@ -379,6 +525,7 @@ function colisDetail(id) {
     <button class="btn" data-act="notify" data-id="${c.id}">Notifier le client</button>
     ${nexts.length ? `<button class="btn btn-primary" data-act="change-status" data-id="${c.id}">Changer le statut</button>` : ""}`)}
   <div class="barcode-box">${barcodeSvg(c.tracking, { height: 44, narrow: 1.6 })}</div>
+  ${m ? `<section class="panel"><div class="panel-head"><h3>Acheminement ${modeIc(m.mode)} <a class="mono" href="#/manifestes/${m.id}">${esc(m.numero)}</a></h3>${badgeRetard(m)}</div>${routeStrip(m, { compact: true })}</section>` : ""}
   <div class="grid-2">
     <section class="panel">
       <div class="panel-head"><h3>Détails</h3>${c.statut === "recu" || isAdmin() ? `<button class="btn btn-sm" data-act="edit-colis" data-id="${c.id}">Modifier</button>` : ""}</div>
@@ -436,9 +583,9 @@ VIEWS.manifestes = id => {
   <div class="filters"><select data-filter="manifestes.statut">${opt("", "Tous les statuts")}${STATUTS_MANIFESTE.map(s => opt(s.id, s.label, s.id === ui.manifestes.statut)).join("")}</select></div>
   ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>N°</th><th>Mode</th><th>Transporteur</th><th>Référence</th><th>Trajet</th><th class="r">Colis</th><th class="r">Poids</th><th>Départ</th><th>ETA</th><th>Statut</th></tr></thead><tbody>
     ${list.map(m => { const cs = db.colis.filter(c => c.manifesteId === m.id); return `<tr class="click" data-href="manifestes/${m.id}">
-      <td class="mono">${esc(m.numero)}</td><td>${m.mode === "mer" ? "Maritime" : "Aérien"}</td><td>${esc(m.transporteur)}</td><td class="mono">${esc(m.reference)}</td>
+      <td class="mono">${esc(m.numero)}</td><td>${modeIc(m.mode)} ${modeLabel(m.mode)}</td><td>${esc(m.transporteur)}<div class="muted small">${esc(transportInfo(m))}</div></td><td class="mono">${esc(m.reference)}</td>
       <td>${esc(m.origine)} → ${esc(m.destination)}</td><td class="num r">${cs.length}</td><td class="num r">${num(cs.reduce((s, c) => s + +c.poids, 0))} lb</td>
-      <td>${fdate(m.dateDepart)}</td><td>${fdate(m.eta)}</td><td>${badgeM(m.statut)}</td></tr>`; }).join("")}
+      <td>${fdate(m.dateDepart)}</td><td>${fdate(m.eta)}</td><td>${badgeM(m.statut)} ${retardManifeste(m) ? badgeRetard(m) : ""}</td></tr>`; }).join("")}
   </tbody></table></div>` : empty("Aucun manifeste.")}`;
 };
 function manifesteDetail(id) {
@@ -448,22 +595,41 @@ function manifesteDetail(id) {
   const ouvert = m.statut === "ouvert";
   const dispo = db.colis.filter(c => c.statut === "recu" && !c.manifesteId && (serviceOf(c.service)?.mode || "air") === m.mode && c.destination === m.destination);
   const autres = db.colis.filter(c => c.statut === "recu" && !c.manifesteId && (serviceOf(c.service)?.mode || "air") === m.mode && c.destination !== m.destination);
-  const idx = STATUTS_MANIFESTE.findIndex(s => s.id === m.statut);
-  const next = STATUTS_MANIFESTE[idx + 1];
+  const next = prochaineEtape(m);
+  const et = m.etapes || [];
   return `
-  ${topbar(`Manifeste <span class="mono">${esc(m.numero)}</span>`, `${badgeM(m.statut)} &nbsp; ${m.mode === "mer" ? "Maritime" : "Aérien"} · ${esc(m.transporteur)} · ${esc(m.reference)}`, `
+  ${topbar(`Manifeste <span class="mono">${esc(m.numero)}</span>`, `${badgeM(m.statut)} ${badgeRetard(m)} &nbsp; ${modeIc(m.mode)} ${modeLabel(m.mode)} · ${esc(m.transporteur)} · ${esc(m.reference)}${transportInfo(m) ? " · " + esc(transportInfo(m)) : ""}`, `
     <a class="btn" href="#/manifestes">← Liste</a>
     <button class="btn" data-act="edit-manifeste" data-id="${m.id}">Modifier</button>
     <button class="btn" data-act="print-manifeste" data-id="${m.id}">Imprimer le manifeste</button>
-    ${next ? `<button class="btn btn-primary" data-act="manif-advance" data-id="${m.id}" ${!cs.length ? "disabled" : ""}>Passer à « ${esc(next.label)} »</button>` : ""}`)}
+    ${next ? `<button class="btn btn-primary" data-act="etape-valider" data-id="${m.id}" data-etape="${next.id}" ${!cs.length ? "disabled title='Ajoutez d’abord des colis'" : ""}>Valider : ${esc(actionEtape(next.action).short)} — ${esc(pointOf(next.pointId).code)}</button>` : ""}`)}
   <div class="kpi-row">
     ${kpi("Colis", cs.length, `${cs.reduce((s, c) => s + +c.pieces, 0)} pièce(s)`)}
     ${kpi("Poids total", num(cs.reduce((s, c) => s + +c.poids, 0)) + " lb")}
     ${kpi("Valeur déclarée", money(cs.reduce((s, c) => s + +c.valeur, 0)))}
     ${kpi("Fret facturé", money(cs.reduce((s, c) => s + c.facture.total, 0)), "", "good")}
-    ${kpi("Départ → ETA", fdate(m.dateDepart), "ETA " + fdate(m.eta))}
+    ${kpi("Départ → arrivée", fdate(m.dateDepart), "Arrivée Haïti " + fdate(m.eta))}
   </div>
-  <p class="muted small">Changer le statut du manifeste met à jour <b>tous ses colis</b> en une seule opération (et ajoute l'étape à leur historique de suivi).</p>
+  <section class="panel">
+    <div class="panel-head"><h3>Itinéraire & points de transit</h3>
+      <div class="row-inline">
+        <button class="btn btn-sm" data-act="etape-new" data-id="${m.id}">+ Étape / escale</button>
+        ${!et.some(e => e.reel) ? `<button class="btn btn-sm" data-act="etapes-reset" data-id="${m.id}">Itinéraire type</button>` : ""}
+      </div></div>
+    ${routeStrip(m)}
+    <div class="table-wrap mt"><table class="tbl"><thead><tr><th>#</th><th>Étape</th><th>Point de transit</th><th>Prévu</th><th>Réalisé</th><th>Écart</th><th>Note</th><th></th></tr></thead><tbody>
+      ${et.map((e, i) => { const p = pointOf(e.pointId); const late = retardEtape(e); const ec = ecartEtape(e); return `<tr>
+        <td>${i + 1}</td><td><b>${esc(actionEtape(e.action).label)}</b></td>
+        <td>${esc(p.nom)} <span class="mono muted">${esc(p.code || "")}</span><div class="muted small">${esc([p.ville, p.pays].filter(Boolean).join(", "))}</div></td>
+        <td>${fdatetime(e.prevu)}</td><td>${e.reel ? fdatetime(e.reel) : "—"}</td>
+        <td>${late ? `<span class="text-bad"><b>Retard ${joursTxt(late)}</b></span>` : e.reel ? (ec > 0.5 ? `<span class="text-bad">+${joursTxt(ec)}</span>` : `<span class="text-good">À l'heure</span>`) : "—"}</td>
+        <td class="small">${esc(e.note || "")}</td>
+        <td class="nowrap">${e === next ? `<button class="btn btn-sm btn-primary" data-act="etape-valider" data-id="${m.id}" data-etape="${e.id}" ${!cs.length ? "disabled" : ""}>Valider</button>` : ""}
+          <button class="btn btn-sm" data-act="etape-edit" data-id="${m.id}" data-etape="${e.id}">Modifier</button></td>
+      </tr>`; }).join("")}
+    </tbody></table></div>
+    <p class="muted small">Valider une étape enregistre sa date réelle, fait avancer le manifeste et ajoute le point de transit à l'historique de <b>tous ses colis</b> (visible par le client dans le suivi).</p>
+  </section>
   <section class="panel"><h3>Colis du manifeste</h3>${colisTable(cs, { removable: ouvert })}</section>
   ${ouvert ? `<form class="panel" data-form="manif-add" data-id="${m.id}">
     <div class="panel-head"><h3>Colis disponibles à l'entrepôt (${dispo.length}) — ${m.mode === "mer" ? "maritime" : "aérien"} → ${esc(m.destination)}</h3>
@@ -642,7 +808,8 @@ VIEWS.suivi = () => {
     <div class="row-between"><div><div class="muted small">Colis</div><div class="big mono">${esc(c.tracking)}</div></div>${badge(c.statut)}</div>
     <div class="progress">${steps.map(s => `<div class="step ${STATUTS.findIndex(x => x.id === s) <= idx && c.statut !== "probleme" ? "done" : ""}"><span></span>${esc(statut(s).short)}</div>`).join("")}</div>
     <div class="facts"><span>Destination <b>${esc(branch(c.destination)?.nom || "")}</b></span><span>Service <b>${esc(serviceOf(c.service)?.nom || "")}</b></span><span>Poids <b>${num(c.poids)} lb</b></span>
-    ${manifesteOf(c.manifesteId) ? `<span>Arrivée prévue <b>${fdate(manifesteOf(c.manifesteId).eta)}</b></span>` : ""}</div>
+    ${manifesteOf(c.manifesteId) ? `<span>${modeIc(manifesteOf(c.manifesteId).mode)} Arrivée en Haïti <b>${fdate(manifesteOf(c.manifesteId).eta)}</b></span>` : ""}</div>
+    ${manifesteOf(c.manifesteId) ? `<h3 class="mt">Itinéraire</h3>${routeStrip(manifesteOf(c.manifesteId), { compact: true })}<h3 class="mt">Historique</h3>` : ""}
     ${timeline(c)}
   </section>` : ""}`;
 };
@@ -722,7 +889,13 @@ VIEWS.parametres = () => {
     <div class="table-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Nom</th><th>Ville</th><th>Téléphone</th><th>Rôle</th></tr></thead><tbody>
       ${s.succursales.map((b, i) => `<tr><td class="mono">${esc(b.id)}</td><td><input name="b.${i}.nom" value="${esc(b.nom)}"></td><td><input name="b.${i}.ville" value="${esc(b.ville)}"></td><td><input name="b.${i}.telephone" value="${esc(b.telephone || "")}"></td><td>${b.type === "origine" ? "Entrepôt d'origine" : "Destination"}</td></tr>`).join("")}
     </tbody></table></div>
-    <div class="form-actions"><button type="button" class="btn" data-act="add-branch">+ Succursale</button><button class="btn btn-primary">Enregistrer les paramètres</button></div>
+    <h3 class="mt">Points de transit (aéroports, ports, entrepôts)</h3>
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>Nom</th><th>Code (IATA / port)</th><th>Ville</th><th>Pays</th><th>Type</th></tr></thead><tbody>
+      ${s.pointsTransit.map((p, i) => `<tr><td><input name="pt.${i}.nom" value="${esc(p.nom)}"></td><td><input name="pt.${i}.code" value="${esc(p.code || "")}"></td>
+        <td><input name="pt.${i}.ville" value="${esc(p.ville || "")}"></td><td><input name="pt.${i}.pays" value="${esc(p.pays || "")}"></td>
+        <td><select name="pt.${i}.type">${TYPES_POINT.map(t => opt(t.id, t.label, t.id === p.type)).join("")}</select></td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="form-actions"><div class="row-inline"><button type="button" class="btn" data-act="add-branch">+ Succursale</button><button type="button" class="btn" data-act="add-point">+ Point de transit</button></div><button class="btn btn-primary">Enregistrer les paramètres</button></div>
   </form>
   <section class="panel">
     <div class="panel-head"><h3>Utilisateurs & rôles</h3><button class="btn btn-sm" data-act="new-user">+ Utilisateur</button></div>
@@ -853,26 +1026,51 @@ const ACTIONS = {
     closeModal(); toast(el.dataset.canal === "WhatsApp" ? "WhatsApp ouvert" : "Message copié");
   },
 
-  "new-manifeste": () => openModal(manifesteForm({ mode: "air", transporteur: "Amerijet", origine: "FLL", destination: "PAP", dateDepart: dayKey(), eta: dayKey(Date.now() + 3 * 86400000) })),
+  "new-manifeste": () => openModal(manifesteForm({ mode: "air", transporteur: "Amerijet", origine: "FLL", destination: "PAP", dateDepart: dayKey(Date.now() + 86400000) })),
   "edit-manifeste": el => openModal(manifesteForm(manifesteOf(el.dataset.id))),
   "manif-remove": (el, e) => {
     e.stopPropagation();
     const c = colisOf(el.dataset.id);
     store.mutate(() => { c.manifesteId = null; if (c.statut === "consolide") addEvent(c, "recu", "Retiré du manifeste"); log("Manifeste", `${c.tracking} retiré`); });
   },
-  "manif-advance": el => {
+  "etape-valider": el => {
+    const m = manifesteOf(el.dataset.id); const e = m.etapes.find(x => x.id === el.dataset.etape);
+    const p = pointOf(e.pointId); const a = actionEtape(e.action);
+    const n = db.colis.filter(c => c.manifesteId === m.id).length;
+    openModal(`<form data-form="etape-valider" data-id="${m.id}" data-etape="${e.id}">
+      <h2>${modeIc(m.mode)} ${esc(a.label)}</h2>
+      <p><b>${esc(p.nom)}</b> <span class="mono muted">${esc(p.code || "")}</span> — ${esc(m.numero)}<br><span class="muted small">Prévu : ${fdatetime(e.prevu)}</span></p>
+      <div class="field"><label>Date et heure réelles</label><input type="datetime-local" name="reel" required value="${dtLocal(store.nowIso())}"></div>
+      <div class="field"><label>Note (ex. n° de vol, observation douane)</label><input name="note" value="${esc(e.note || "")}"></div>
+      <p class="muted small">${a.statut ? `Le manifeste passera à « ${esc(statutManifeste(a.statut).label)} » et ` : ""}${n} colis recevront cette étape dans leur historique.</p>
+      <div class="modal-actions"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Valider l'étape</button></div>
+    </form>`);
+  },
+  "etape-edit": el => openModal(etapeForm(manifesteOf(el.dataset.id), manifesteOf(el.dataset.id).etapes.find(x => x.id === el.dataset.etape))),
+  "etape-new": el => {
     const m = manifesteOf(el.dataset.id);
-    const next = STATUTS_MANIFESTE[STATUTS_MANIFESTE.findIndex(s => s.id === m.statut) + 1];
-    const cs = db.colis.filter(c => c.manifesteId === m.id);
-    if (!next || !confirmBox(`Passer le manifeste ${m.numero} à « ${next.label} » ?\n${cs.length} colis seront mis à jour.`)) return;
-    store.mutate(() => {
-      m.statut = next.id;
-      if (next.id === "transit" && !m.dateDepart) m.dateDepart = store.nowIso();
-      const st = MANIFESTE_TO_COLIS[next.id];
-      cs.forEach(c => { if (st && c.statut !== "probleme" && c.statut !== st) addEvent(c, st, `Manifeste ${m.numero}`); });
-      log("Manifeste", `${m.numero} → ${next.label} (${cs.length} colis)`);
+    // Date proposée : 2 h après l'étape choisie dans « Insérer après »
+    const apres = id => new Date(new Date(m.etapes.find(x => x.id === id)?.prevu || Date.now()).getTime() + 2 * 3600000).toISOString();
+    openModal(etapeForm(m, { action: "escale", prevu: store.nowIso() }), {
+      onMount: f => { const sel = f.querySelector("[name=apres]"), pv = f.querySelector("[name=prevu]"); const upd = () => { pv.value = dtLocal(apres(sel.value)); }; sel.addEventListener("change", upd); upd(); },
     });
-    toast(`Manifeste ${m.numero} : ${next.label}`);
+  },
+  "etape-delete": el => {
+    const m = manifesteOf(el.dataset.id);
+    if (!confirmBox("Supprimer cette étape de l'itinéraire ?")) return;
+    store.mutate(() => { m.etapes = m.etapes.filter(x => x.id !== el.dataset.etape); syncDatesManifeste(m); });
+    closeModal();
+  },
+  "etapes-reset": el => {
+    const m = manifesteOf(el.dataset.id);
+    if (!confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
+    store.mutate(() => { m.etapes = itineraireType(m.mode, m.destination, m.dateDepart); syncDatesManifeste(m); });
+  },
+  "ach-mode": el => { ui.acheminement.mode = el.dataset.id; render(); },
+  "ach-vue": el => { ui.acheminement.vue = el.dataset.id; render(); },
+  "add-point": () => {
+    store.mutate(d => { d.settings.pointsTransit.push({ id: "PT-" + store.uid().slice(0, 5).toUpperCase(), nom: "Nouveau point", code: "", ville: "", pays: "USA", type: "aeroport" }); });
+    toast("Point ajouté : complétez la ligne puis enregistrez");
   },
 
   "print-label": el => printLabel(colisOf(el.dataset.id)),
@@ -927,12 +1125,42 @@ function manifesteForm(m) {
       <div class="field"><label>Référence (AWB / BL / n° conteneur)</label><input name="reference" value="${esc(m.reference || "")}"></div>
       <div class="field"><label>Destination</label><select name="destination">${S().succursales.filter(b => b.type === "destination").map(b => opt(b.id, b.nom, b.id === m.destination)).join("")}</select></div>
     </div>
-    <div class="form-grid">
-      <div class="field"><label>Date de départ</label><input type="date" name="dateDepart" value="${esc(m.dateDepart ? dayKey(m.dateDepart) : "")}"></div>
-      <div class="field"><label>Arrivée prévue (ETA)</label><input type="date" name="eta" value="${esc(m.eta ? dayKey(m.eta) : "")}"></div>
+    <div class="form-grid g3">
+      <div class="field"><label>N° de vol (aérien)</label><input name="vol" value="${esc(m.vol || "")}" placeholder="M6 1403"></div>
+      <div class="field"><label>Navire / voyage (maritime)</label><input name="navire" value="${esc(m.navire || "")}" placeholder="Crowley Tiscortes — V.2536S"></div>
+      <div class="field"><label>N° conteneur (maritime)</label><input name="conteneur" value="${esc(m.conteneur || "")}" placeholder="CMCU 481220-7"></div>
     </div>
+    ${m.id ? `<p class="muted small">Les dates et points de transit se modifient dans l'itinéraire du manifeste.</p>` : `
+    <div class="field"><label>Date de départ prévue (vol / appareillage)</label><input type="date" name="dateDepart" required value="${esc(m.dateDepart ? dayKey(m.dateDepart) : "")}"></div>
+    <p class="muted small">L'itinéraire type (entrepôt → aéroport/port de départ → arrivée en Haïti → douane → succursale) est créé avec ses dates prévues ; vous pourrez ajouter des escales ensuite.</p>`}
     <div class="field"><label>Notes</label><input name="notes" value="${esc(m.notes || "")}"></div>
     <div class="modal-actions"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Enregistrer</button></div>
+  </form>`;
+}
+function pointsOptions(selected) {
+  const grp = (label, list) => list.length ? `<optgroup label="${esc(label)}">${list.map(p => opt(p.id, `${p.nom}${p.code ? " (" + p.code + ")" : ""}`, p.id === selected)).join("")}</optgroup>` : "";
+  const pts = S().pointsTransit;
+  return grp("États-Unis", pts.filter(p => p.pays === "USA")) + grp("Haïti", pts.filter(p => p.pays === "Haïti"))
+    + grp("Autres pays (escales)", pts.filter(p => p.pays !== "USA" && p.pays !== "Haïti"))
+    + grp("Succursales WELJ", S().succursales.map(b => pointOf(b.id)));
+}
+function etapeForm(m, e) {
+  const neu = !e.id;
+  return `<form data-form="etape" data-id="${m.id}" data-etape="${esc(e.id || "")}">
+    <h2>${neu ? "Ajouter une étape / escale" : "Modifier l'étape"} — ${esc(m.numero)}</h2>
+    <div class="form-grid">
+      <div class="field"><label>Étape</label><select name="action">${ACTIONS_ETAPE.map(a => opt(a.id, a.label, a.id === e.action)).join("")}</select></div>
+      <div class="field"><label>Point de transit</label><select name="pointId">${pointsOptions(e.pointId)}</select></div>
+    </div>
+    <div class="form-grid">
+      <div class="field"><label>Date prévue</label><input type="datetime-local" name="prevu" required value="${dtLocal(e.prevu)}"></div>
+      <div class="field"><label>Date réalisée ${isAdmin() ? "(correction)" : ""}</label><input type="datetime-local" name="reel" value="${dtLocal(e.reel)}" ${isAdmin() || !e.reel ? "" : "disabled"}></div>
+    </div>
+    ${neu ? `<div class="field"><label>Insérer après</label><select name="apres">${m.etapes.map((x, i) => opt(x.id, `${i + 1}. ${actionEtape(x.action).short} — ${pointOf(x.pointId).code}`, x === (m.etapes.filter(y => y.reel).at(-1) || m.etapes[0]))).join("")}</select></div>` : ""}
+    <div class="field"><label>Note</label><input name="note" value="${esc(e.note || "")}"></div>
+    ${neu ? "" : `<label class="check"><input type="checkbox" name="decaler" ${e.reel ? "" : "checked"}> Reporter aussi les étapes suivantes non réalisées du même décalage</label>`}
+    <div class="modal-actions">${!neu && !e.reel ? `<button type="button" class="btn btn-danger" data-act="etape-delete" data-id="${m.id}" data-etape="${e.id}">Supprimer</button>` : ""}
+      <button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Enregistrer</button></div>
   </form>`;
 }
 function userForm(u) {
@@ -1040,16 +1268,59 @@ const FORMS = {
     const d = formData(form); const id = form.dataset.id;
     // Midi local : évite qu'une date saisie s'affiche la veille à cause du fuseau horaire
     const toIso = v => v ? new Date(v + "T12:00:00").toISOString() : "";
-    d.dateDepart = toIso(d.dateDepart); d.eta = toIso(d.eta);
+    const info = { transporteur: d.transporteur, reference: d.reference, vol: d.vol, navire: d.navire, conteneur: d.conteneur, destination: d.destination, notes: d.notes };
     let m;
     store.mutate(db_ => {
-      if (id) { m = manifesteOf(id); Object.assign(m, { transporteur: d.transporteur, reference: d.reference, destination: d.destination, dateDepart: d.dateDepart, eta: d.eta, notes: d.notes }); return; }
+      if (id) {
+        m = manifesteOf(id); Object.assign(m, info);
+        m.etapes.filter(e => e.action === "succursale" && !e.reel).forEach(e => { e.pointId = d.destination; });
+        return;
+      }
       const seq = store.nextSeq("manifeste");
-      m = { id: store.uid(), numero: numeroManifeste(seq, d.mode), mode: d.mode, transporteur: d.transporteur, reference: d.reference, origine: "FLL", destination: d.destination,
-        dateDepart: d.dateDepart, eta: d.eta, statut: "ouvert", notes: d.notes, createdAt: store.nowIso() };
+      m = { id: store.uid(), numero: numeroManifeste(seq, d.mode), mode: d.mode, ...info, origine: "FLL", statut: "ouvert", createdAt: store.nowIso(),
+        etapes: itineraireType(d.mode, d.destination, toIso(d.dateDepart)) };
+      syncDatesManifeste(m);
       db_.manifestes.push(m); log("Nouveau manifeste", m.numero);
     });
     closeModal(); go("manifestes", m.id);
+  },
+  etape: form => {
+    const m = manifesteOf(form.dataset.id); const d = formData(form);
+    const prevu = new Date(d.prevu).toISOString();
+    store.mutate(() => {
+      if (!form.dataset.etape) {
+        const e = { id: store.uid(), pointId: d.pointId, action: d.action, prevu, reel: d.reel ? new Date(d.reel).toISOString() : null, note: d.note };
+        const at = m.etapes.findIndex(x => x.id === d.apres);
+        m.etapes.splice(at + 1, 0, e);
+        log("Itinéraire", `${m.numero} : ${actionEtape(d.action).short} à ${pointOf(d.pointId).nom} ajoutée`);
+      } else {
+        const i = m.etapes.findIndex(x => x.id === form.dataset.etape); const e = m.etapes[i];
+        const delta = new Date(prevu) - new Date(e.prevu);
+        Object.assign(e, { pointId: d.pointId, action: d.action, prevu, note: d.note });
+        if (form.reel && !form.reel.disabled) e.reel = d.reel ? new Date(d.reel).toISOString() : null;
+        if (d.decaler && delta) m.etapes.slice(i + 1).forEach(x => { if (!x.reel) x.prevu = new Date(new Date(x.prevu).getTime() + delta).toISOString(); });
+        log("Itinéraire", `${m.numero} : étape ${actionEtape(e.action).short} modifiée${delta ? ` (${delta > 0 ? "+" : ""}${num(delta / 86400000)} j)` : ""}`);
+      }
+      syncDatesManifeste(m);
+    });
+    closeModal(); toast("Itinéraire mis à jour");
+  },
+  "etape-valider": form => {
+    const m = manifesteOf(form.dataset.id); const e = m.etapes.find(x => x.id === form.dataset.etape); const d = formData(form);
+    const reel = new Date(d.reel).toISOString();
+    const p = pointOf(e.pointId); const a = actionEtape(e.action);
+    store.mutate(() => {
+      e.reel = reel; e.note = d.note;
+      const note = `${a.label} — ${p.nom}${p.code ? " (" + p.code + ")" : ""}${d.note ? " · " + d.note : ""}`;
+      const lieu = [p.nom, p.ville].filter(Boolean).join(", ");
+      const avances = a.statut ? setManifesteStatut(m, a.statut, { note, lieu, date: reel }) : [];
+      // Les colis dont le statut ne change pas reçoivent quand même le point de passage dans leur historique
+      db.colis.filter(c => c.manifesteId === m.id && !avances.includes(c.id) && c.statut !== "probleme" && STATUT_ORDER[c.statut] <= STATUT_ORDER.arrive)
+        .forEach(c => addEvent(c, c.statut, note, lieu, reel));
+      syncDatesManifeste(m);
+      log("Acheminement", `${m.numero} : ${a.short} à ${p.nom} (${fdatetime(reel)})`);
+    });
+    closeModal(); toast(`${m.numero} : ${a.short} validé(e)`);
   },
   "manif-add": form => {
     const m = manifesteOf(form.dataset.id);
@@ -1077,6 +1348,7 @@ const FORMS = {
         else if (p === "f") s.frais[a] = +v || 0;
         else if (p === "s") s.services[+a][b] = b === "prix" || b === "minimum" ? +v || 0 : v;
         else if (p === "b") s.succursales[+a][b] = v;
+        else if (p === "pt") s.pointsTransit[+a][b] = v;
         else if (k === "tauxChange" || k === "diviseurVolumetrique") s[k] = +v || s[k];
       }
       log("Paramètres", "Paramètres mis à jour");
@@ -1129,7 +1401,11 @@ function printManifeste(m) {
   printHtml(`${docHeader()}
     <h2>Manifeste de chargement ${esc(m.numero)}</h2>
     <div class="doc-cols"><div><b>Mode</b><br>${m.mode === "mer" ? "Maritime" : "Aérien"} — ${esc(m.transporteur)}</div><div><b>Référence</b><br>${esc(m.reference)}</div>
-    <div><b>Trajet</b><br>${esc(branch(m.origine)?.ville || m.origine)} → ${esc(branch(m.destination)?.ville || m.destination)}</div><div><b>Départ / ETA</b><br>${fdate(m.dateDepart)} / ${fdate(m.eta)}</div></div>
+    <div><b>Trajet</b><br>${esc(branch(m.origine)?.ville || m.origine)} → ${esc(branch(m.destination)?.ville || m.destination)}</div><div><b>Départ / ETA</b><br>${fdate(m.dateDepart)} / ${fdate(m.eta)}</div>
+    <div><b>${m.mode === "mer" ? "Navire / conteneur" : "Vol"}</b><br>${esc(transportInfo(m) || "—")}</div></div>
+    <table class="doc-table"><thead><tr><th>Étape</th><th>Point de transit</th><th>Prévu</th><th>Réalisé</th></tr></thead><tbody>
+    ${(m.etapes || []).map(e => `<tr><td>${esc(actionEtape(e.action).label)}</td><td>${esc(pointOf(e.pointId).nom)} ${esc(pointOf(e.pointId).code || "")}</td><td>${fdatetime(e.prevu)}</td><td>${e.reel ? fdatetime(e.reel) : ""}</td></tr>`).join("")}
+    </tbody></table><br>
     <table class="doc-table"><thead><tr><th>#</th><th>N° WELJ</th><th>Destinataire</th><th>Contenu</th><th class="r">Pcs</th><th class="r">Poids (lb)</th><th class="r">Valeur ($)</th></tr></thead><tbody>
     ${cs.map((c, i) => `<tr><td>${i + 1}</td><td>${esc(c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "")}</td><td>${esc(c.description)}</td><td class="r">${c.pieces}</td><td class="r">${num(c.poids)}</td><td class="r">${num(c.valeur, 0)}</td></tr>`).join("")}
     <tr class="total"><td colspan="4">Total : ${cs.length} colis</td><td class="r">${cs.reduce((s, c) => s + +c.pieces, 0)}</td><td class="r">${num(cs.reduce((s, c) => s + +c.poids, 0))}</td><td class="r">${num(cs.reduce((s, c) => s + +c.valeur, 0), 0)}</td></tr>
