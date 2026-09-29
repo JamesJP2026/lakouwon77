@@ -439,7 +439,7 @@ function receptionRapide() {
     <section class="panel">
       <h3>Scanner les colis reçus</h3>
       <form data-form="rc-scan" class="row-inline">
-        <input name="code" class="scan-input" placeholder="Numéro de suivi (Amazon, UPS, FedEx…) puis Entrée" aria-label="Numéro de suivi" autocomplete="off">
+        <input name="code" class="scan-input" placeholder="Scannez le numéro de suivi (Amazon, UPS, FedEx…)" aria-label="Numéro de suivi" autocomplete="off">
         <button class="btn btn-primary">Ajouter</button>
       </form>
       ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone} mt-s">${esc(ui.scanMsg.text)}</div>` : ""}
@@ -898,7 +898,7 @@ function transfertNouveau() {
     <section class="panel">
       <h3>1. Numéros de tracking envoyés</h3>
       <form data-form="tf-scan" class="row-inline">
-        <input name="code" class="scan-input" placeholder="Scanner ou taper un tracking puis Entrée" aria-label="Tracking" autocomplete="off">
+        <input name="code" class="scan-input" placeholder="Scannez le colis (ou tapez le numéro puis Entrée)" aria-label="Tracking" autocomplete="off">
         <button class="btn btn-primary">Ajouter</button>
       </form>
       ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone} mt-s">${esc(ui.scanMsg.text)}</div>` : ""}
@@ -1973,7 +1973,32 @@ function applyFilter(el) {
   ui[page][key] = el.value;
   render();
 }
+/* ---------- Scan automatique ----------
+   Une douchette tape tout le numéro en quelques millisecondes : dès que la
+   rafale s'arrête, le champ est enregistré sans attendre la touche Entrée.
+   Une saisie au clavier (plus lente) attend toujours Entrée, pour ne jamais
+   enregistrer un numéro à moitié tapé.                                      */
+const SCAN = { dernier: 0, ecarts: [], minuteur: null, RAFALE_MS: 50, PAUSE_MS: 120 };
+function envoyerScan(el) {
+  if (!document.body.contains(el) || el.value.trim().length < 4 || !el.form) return;
+  el.form.requestSubmit();
+}
+document.addEventListener("input", e => {
+  const el = e.target;
+  if (!el.classList?.contains("scan-input")) return;
+  const maintenant = performance.now();
+  const ecart = maintenant - SCAN.dernier; SCAN.dernier = maintenant;
+  clearTimeout(SCAN.minuteur);
+  // Numéro collé d'un coup : enregistré tout de suite
+  if (e.inputType === "insertFromPaste") { if (!/\s/.test(el.value.trim())) envoyerScan(el); return; }
+  if (el.value.length <= 1) { SCAN.ecarts = []; return; }
+  SCAN.ecarts.push(ecart);
+  const recents = SCAN.ecarts.slice(-6);
+  const douchette = recents.length >= 3 && recents.reduce((a, b) => a + b, 0) / recents.length < SCAN.RAFALE_MS;
+  if (douchette) SCAN.minuteur = setTimeout(() => envoyerScan(el), SCAN.PAUSE_MS);
+});
 document.addEventListener("submit", e => {
+  clearTimeout(SCAN.minuteur); SCAN.ecarts = [];
   const form = e.target.closest("[data-form]");
   if (form && FORMS[form.dataset.form]) { e.preventDefault(); FORMS[form.dataset.form](form); }
 });

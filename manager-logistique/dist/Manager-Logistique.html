@@ -267,6 +267,8 @@ li.click:hover { background: #f6f8fc; }
 /* ---------- Transferts entre bureaux ---------- */
 .scan-input { flex: 1; min-width: 0; padding: 11px 13px; border: 2px solid var(--navy); border-radius: 8px; font-size: 15px; font-family: "JetBrains Mono", ui-monospace, monospace; }
 .scan-input:focus { outline: 3px solid var(--orange-soft); border-color: var(--orange); }
+form:has(> .scan-input)::after { content: "⚡ Enregistré automatiquement dès le scan"; flex-basis: 100%; font-size: 11.5px; color: var(--ink-soft); }
+form.row-inline:has(> .scan-input) { flex-wrap: wrap; }
 .mt-s { margin-top: 10px; }
 details summary.link { cursor: pointer; color: var(--info); font-size: 13px; }
 details textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; font-family: "JetBrains Mono", ui-monospace, monospace; }
@@ -1485,7 +1487,7 @@ __modules["app"] = (() => {
       <section class="panel">
         <h3>Scanner les colis reçus</h3>
         <form data-form="rc-scan" class="row-inline">
-          <input name="code" class="scan-input" placeholder="Numéro de suivi (Amazon, UPS, FedEx…) puis Entrée" aria-label="Numéro de suivi" autocomplete="off">
+          <input name="code" class="scan-input" placeholder="Scannez le numéro de suivi (Amazon, UPS, FedEx…)" aria-label="Numéro de suivi" autocomplete="off">
           <button class="btn btn-primary">Ajouter</button>
         </form>
         ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone} mt-s">${esc(ui.scanMsg.text)}</div>` : ""}
@@ -1944,7 +1946,7 @@ __modules["app"] = (() => {
       <section class="panel">
         <h3>1. Numéros de tracking envoyés</h3>
         <form data-form="tf-scan" class="row-inline">
-          <input name="code" class="scan-input" placeholder="Scanner ou taper un tracking puis Entrée" aria-label="Tracking" autocomplete="off">
+          <input name="code" class="scan-input" placeholder="Scannez le colis (ou tapez le numéro puis Entrée)" aria-label="Tracking" autocomplete="off">
           <button class="btn btn-primary">Ajouter</button>
         </form>
         ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone} mt-s">${esc(ui.scanMsg.text)}</div>` : ""}
@@ -3019,7 +3021,32 @@ __modules["app"] = (() => {
     ui[page][key] = el.value;
     render();
   }
+  /* ---------- Scan automatique ----------
+     Une douchette tape tout le numéro en quelques millisecondes : dès que la
+     rafale s'arrête, le champ est enregistré sans attendre la touche Entrée.
+     Une saisie au clavier (plus lente) attend toujours Entrée, pour ne jamais
+     enregistrer un numéro à moitié tapé.                                      */
+  const SCAN = { dernier: 0, ecarts: [], minuteur: null, RAFALE_MS: 50, PAUSE_MS: 120 };
+  function envoyerScan(el) {
+    if (!document.body.contains(el) || el.value.trim().length < 4 || !el.form) return;
+    el.form.requestSubmit();
+  }
+  document.addEventListener("input", e => {
+    const el = e.target;
+    if (!el.classList?.contains("scan-input")) return;
+    const maintenant = performance.now();
+    const ecart = maintenant - SCAN.dernier; SCAN.dernier = maintenant;
+    clearTimeout(SCAN.minuteur);
+    // Numéro collé d'un coup : enregistré tout de suite
+    if (e.inputType === "insertFromPaste") { if (!/\s/.test(el.value.trim())) envoyerScan(el); return; }
+    if (el.value.length <= 1) { SCAN.ecarts = []; return; }
+    SCAN.ecarts.push(ecart);
+    const recents = SCAN.ecarts.slice(-6);
+    const douchette = recents.length >= 3 && recents.reduce((a, b) => a + b, 0) / recents.length < SCAN.RAFALE_MS;
+    if (douchette) SCAN.minuteur = setTimeout(() => envoyerScan(el), SCAN.PAUSE_MS);
+  });
   document.addEventListener("submit", e => {
+    clearTimeout(SCAN.minuteur); SCAN.ecarts = [];
     const form = e.target.closest("[data-form]");
     if (form && FORMS[form.dataset.form]) { e.preventDefault(); FORMS[form.dataset.form](form); }
   });

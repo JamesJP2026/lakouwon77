@@ -155,6 +155,15 @@ manager-logistique/
 - **Portail client en ligne** (suivi et pré-alertes par le client
   lui-même en ligne) : à construire une fois la base partagée en place.
 
+## Scan avec une douchette
+
+Dans la réception entrepôt et les transferts entre bureaux, chaque colis
+est **enregistré automatiquement dès qu'il est scanné**, sans appuyer sur
+Entrée : l'app reconnaît la frappe très rapide d'une douchette. Un numéro
+tapé à la main attend toujours la touche Entrée, et un numéro collé est
+enregistré tout de suite. Les douchettes qui envoient Entrée après le code
+fonctionnent aussi, sans doublon.
+
 ## Coordonnées de l'entreprise
 
 L'application ne contient le nom d'aucune entreprise : renseignez votre nom,
