@@ -448,7 +448,7 @@ function receptionRapide() {
       </details>
       <datalist id="clients-list">${db.clients.map(x => `<option value="${esc(clientLabel(x))}">`).join("")}</datalist>
       <div class="table-wrap mt">${n ? `<table class="tbl"><thead><tr><th>#</th><th>N° de suivi</th><th>Client</th><th>Pièces</th><th>Poids (lb)</th><th></th></tr></thead><tbody>
-        ${L.lignes.map((l, i) => `<tr><td>${n - i}</td><td class="mono">${esc(l.tracking)}</td>
+        ${L.lignes.map((l, i) => `<tr><td>${n - i}</td><td class="mono nowrap">${esc(l.tracking)} <button type="button" class="btn-fix" data-act="fix-tracking" data-scope="rc-draft" data-i="${i}" title="Corriger le numéro" aria-label="Corriger le numéro">✎</button></td>
           <td><input class="cell-input" list="clients-list" data-line="${i}" data-field="clientRef" value="${esc(l.clientRef)}" placeholder="${L.clientDefaut ? "par défaut" : "Code ou nom"}" aria-label="Client du colis ${esc(l.tracking)}"></td>
           <td><input class="cell-input narrow" type="number" min="1" step="1" data-line="${i}" data-field="pieces" value="${esc(l.pieces)}" aria-label="Pièces"></td>
           <td><input class="cell-input narrow" type="number" min="0" step="0.1" data-line="${i}" data-field="poids" value="${esc(l.poids)}" placeholder="à peser" aria-label="Poids"></td>
@@ -660,7 +660,8 @@ function colisDetail(id) {
       <div class="panel-head"><h3>Détails</h3>${c.statut === "recu" || isAdmin() ? `<button class="btn btn-sm" data-act="edit-colis" data-id="${c.id}">Modifier</button>` : ""}</div>
       <dl class="dl">
         <dt>Client</dt><dd>${cl ? `<a href="#/clients/${cl.id}">${esc(clientLabel(cl))}</a><br><span class="muted small">${esc(cl.telephone)}</span>` : "—"}</dd>
-        <dt>N° fournisseur</dt><dd class="mono">${esc(c.trackingFournisseur || "—")}</dd>
+        <dt>N° fournisseur</dt><dd class="mono">${esc(c.trackingFournisseur || "—")} <button type="button" class="btn-fix" data-act="fix-tracking" data-scope="colis" data-id="${c.id}" title="Corriger le numéro" aria-label="Corriger le numéro">✎</button>
+          ${c.corrections?.length ? `<div class="muted small">corrigé ${c.corrections.length} fois · ancien : ${esc(c.corrections[0].ancien || "—")}</div>` : ""}</dd>
         ${c.receptionId && (db.receptions || []).some(r => r.id === c.receptionId) ? `<dt>Lot de réception</dt><dd><a class="mono" href="#/reception/${c.receptionId}">${esc(db.receptions.find(r => r.id === c.receptionId).numero)}</a></dd>` : ""}
         <dt>Contenu</dt><dd>${esc(c.description)} <span class="muted">(${esc(c.categorie)})</span></dd>
         <dt>Pièces / poids</dt><dd>${c.pieces} pièce(s) — ${c.aPeser ? '<span class="badge tone-warn">à peser</span>' : num(c.poids) + " lb"} ${c.longueur ? `— ${c.longueur}×${c.largeur}×${c.hauteur} po (vol. ${num(poidsVolumetrique(c, S().diviseurVolumetrique))} lb)` : ""}</dd>
@@ -907,7 +908,7 @@ function transfertNouveau() {
         <button class="btn btn-sm mt-s">Ajouter la liste</button></form>
       </details>
       <div class="table-wrap mt">${d.lignes.length ? `<table class="tbl"><thead><tr><th>#</th><th>Tracking</th><th>Colis dans le système</th><th></th></tr></thead><tbody>
-        ${d.lignes.map((l, i) => { const c = colisOf(l.colisId); return `<tr><td>${d.lignes.length - i}</td><td class="mono">${esc(l.tracking)}</td>
+        ${d.lignes.map((l, i) => { const c = colisOf(l.colisId); return `<tr><td>${d.lignes.length - i}</td><td class="mono nowrap">${esc(l.tracking)} <button type="button" class="btn-fix" data-act="fix-tracking" data-scope="tf-draft" data-i="${i}" title="Corriger le numéro" aria-label="Corriger le numéro">✎</button></td>
           <td>${c ? `${esc(clientOf(c.clientId)?.nom || "")} — ${esc(c.description)} <span class="muted small">(${esc(c.destination)})</span> ${badge(c.statut)}` : '<span class="muted">Non enregistré — sera suivi par son numéro</span>'}</td>
           <td><button class="btn btn-sm btn-danger" data-act="tf-remove" data-id="${esc(l.tracking)}" aria-label="Retirer ${esc(l.tracking)}">✕</button></td></tr>`; }).join("")}
       </tbody></table>` : empty("Aucun tracking ajouté. Scannez les colis un par un.")}</div>
@@ -966,7 +967,7 @@ function transfertDetail(id) {
   </section>` : `<div class="alert ${statutTransfert(t) === "recu" ? "good" : "bad"}">Réception clôturée le ${fdatetime(t.cloture)}${t.lignes.some(l => l.manquant) ? ` — ${t.lignes.filter(l => l.manquant).length} colis manquant(s)` : " — tout est arrivé"}.</div>`}
   <div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Tracking</th><th>Client / contenu</th><th>État</th><th>Date de réception</th><th>Reçu par</th><th></th></tr></thead><tbody>
     ${t.lignes.map((l, i) => { const c = colisOf(l.colisId); return `<tr>
-      <td>${i + 1}</td><td class="mono">${c ? `<a href="#/colis/${c.id}">${esc(l.tracking)}</a>` : esc(l.tracking)}</td>
+      <td>${i + 1}</td><td class="mono"><span class="nowrap">${c ? `<a href="#/colis/${c.id}">${esc(l.tracking)}</a>` : esc(l.tracking)} <button type="button" class="btn-fix" data-act="fix-tracking" data-scope="tf" data-id="${t.id}" data-i="${i}" title="Corriger le numéro" aria-label="Corriger le numéro">✎</button></span>${l.corrections?.length ? `<div class="muted small" title="${esc(l.corrections.map(x => `${fdatetime(x.date)} : ${x.ancien} → ${x.nouveau} (${x.motif})`).join("\n"))}">corrigé · ancien : ${esc(l.corrections[0].ancien)}</div>` : ""}</td>
       <td>${c ? `${esc(clientOf(c.clientId)?.nom || "")} — ${esc(c.description)}` : '<span class="muted">—</span>'}</td>
       <td>${etat(l)}</td><td class="nowrap">${l.recu ? fdatetime(l.dateReception) : "—"}</td><td>${l.recuPar ? esc(userName(l.recuPar)) : ""}</td>
       <td class="nowrap">${ouvert ? (l.recu ? `<button class="btn btn-sm" data-act="tf-unmark" data-id="${t.id}" data-i="${i}">Annuler</button>` : `<button class="btn btn-sm btn-primary" data-act="tf-mark" data-id="${t.id}" data-i="${i}">Reçu</button>`)
@@ -1373,6 +1374,21 @@ const ACTIONS = {
     if (!await confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
     store.mutate(() => { m.etapes = itineraireType(m.mode, m.destination, m.dateDepart); syncDatesManifeste(m); });
   },
+  "fix-tracking": el => {
+    const { scope, id, i } = el.dataset;
+    const actuel = scope === "colis" ? colisOf(id).trackingFournisseur : scope === "tf" ? transfertOf(id).lignes[+i].tracking
+      : scope === "tf-draft" ? ui.transfert.lignes[+i].tracking : ui.reception.lot.lignes[+i].tracking;
+    openModal(`<form data-form="fix-tracking" data-scope="${esc(scope)}" data-id="${esc(id || "")}" data-i="${esc(i ?? "")}">
+      <h2>Corriger le numéro de suivi</h2>
+      <p>Numéro actuel : <b class="mono">${esc(actuel || "—")}</b></p>
+      <div class="field"><label for="fix-nouveau">Bon numéro (tapez-le ou scannez l'étiquette)</label>
+        <input id="fix-nouveau" name="nouveau" class="fix-input" required autocomplete="off" value="${esc(actuel || "")}"></div>
+      <div class="field"><label for="fix-motif">Motif</label><select id="fix-motif" name="motif">
+        ${["Faute de frappe", "Mauvais code-barres scanné", "Étiquette abîmée ou illisible", "Numéro changé par le transporteur", "Autre"].map(x => opt(x, x)).join("")}</select></div>
+      <p class="muted small">L'ancien numéro reste dans l'historique avec la date et votre nom.</p>
+      <div class="modal-actions"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Corriger</button></div>
+    </form>`, { onMount: f => { const x = f.querySelector("#fix-nouveau"); x.focus(); x.select(); } });
+  },
   "rc-mode": el => { ui.reception.mode = el.dataset.id; ui.scanMsg = null; render(); },
   "rc-remove": el => { ui.reception.lot.lignes.splice(+el.dataset.id, 1); ui.scanMsg = null; render(); },
   "rc-reset": async () => { if (!ui.reception.lot?.lignes.length || await confirmBox("Vider ce lot de réception ?")) { ui.reception.lot = null; ui.scanMsg = null; render(); } },
@@ -1698,6 +1714,55 @@ const FORMS = {
     if (branch(code)) { toast(`Le code ${code} est déjà utilisé`, "bad"); return; }
     store.mutate(db_ => { db_.settings.succursales.push({ id: code, nom: d.nom || "Succursale " + d.ville, ville: d.ville, type: "destination", telephone: "", actif: d.actif }); log("Paramètres", `Succursale ${code} ajoutée`); });
     closeModal(); toast(`Succursale ${code} ajoutée`);
+  },
+  "fix-tracking": form => {
+    const { scope, id } = form.dataset; const i = +form.dataset.i; const d = formData(form);
+    const nouveau = d.nouveau.trim().toUpperCase().replace(/\s+/g, "");
+    const refus = msg => toast(msg, "bad");
+    if (!nouveau) return refus("Saisissez le bon numéro.");
+    const trace = ancien => ({ ancien, nouveau, motif: d.motif, date: store.nowIso(), user: me().id });
+    if (scope === "tf-draft" || scope === "rc-draft") {
+      const lignes = scope === "tf-draft" ? ui.transfert.lignes : ui.reception.lot.lignes; const l = lignes[i];
+      if (nouveau === l.tracking) return closeModal();
+      if (lignes.some((x, k) => k !== i && x.tracking === nouveau)) return refus(`${nouveau} est déjà dans la liste.`);
+      const c = findColis(nouveau);
+      if (scope === "rc-draft" && c) return refus(`${nouveau} a déjà été reçu le ${fdate(c.createdAt)} (colis ${c.tracking}).`);
+      l.tracking = scope === "tf-draft" && c ? c.tracking : nouveau;
+      if (scope === "tf-draft") l.colisId = c?.id || null;
+      ui.scanMsg = { tone: "good", text: `✓ Numéro corrigé : ${l.tracking}${scope === "tf-draft" && !c ? " (non enregistré dans le système)" : ""}` };
+      closeModal(); render(); return;
+    }
+    if (scope === "tf") {
+      const t = transfertOf(id); const l = t.lignes[i];
+      if (nouveau === l.tracking) return closeModal();
+      const c = findColis(nouveau); const cible = c ? c.tracking : nouveau;
+      const autre = t.lignes.findIndex((x, k) => k !== i && (x.tracking === cible || (c && x.colisId === c.id)));
+      if (autre >= 0 && !t.lignes[autre].horsListe) return refus(`${cible} est déjà sur ce bordereau (ligne ${autre + 1}).`);
+      store.mutate(() => {
+        (l.corrections ||= []).push(trace(l.tracking));
+        l.tracking = cible; l.colisId = c?.id || null;
+        // Le bon colis avait été scanné « hors bordereau » : on fusionne avec la ligne corrigée
+        if (autre >= 0) {
+          const h = t.lignes[autre];
+          if (h.recu) Object.assign(l, { recu: true, dateReception: h.dateReception, recuPar: h.recuPar, manquant: false });
+          t.lignes.splice(autre, 1);
+        }
+        if (c) addEvent(c, c.statut, `N° corrigé sur le transfert ${t.numero} (${d.motif})`, branch(t.destination)?.nom);
+        log("Correction", `${t.numero} : ${l.corrections.at(-1).ancien} → ${cible} (${d.motif})`);
+      });
+      closeModal(); toast(`Numéro corrigé : ${cible}${autre >= 0 ? " — fusionné avec le colis scanné hors bordereau" : ""}`); return;
+    }
+    const c = colisOf(id);
+    if (nouveau === (c.trackingFournisseur || "").toUpperCase()) return closeModal();
+    const doublon = db.colis.find(x => x.id !== c.id && (x.tracking.toUpperCase() === nouveau || String(x.trackingFournisseur || "").toUpperCase() === nouveau));
+    if (doublon) return refus(`${nouveau} appartient déjà au colis ${doublon.tracking}.`);
+    store.mutate(() => {
+      (c.corrections ||= []).push(trace(c.trackingFournisseur || ""));
+      c.trackingFournisseur = nouveau;
+      addEvent(c, c.statut, `N° de suivi corrigé : ${c.corrections.at(-1).ancien || "—"} → ${nouveau} (${d.motif})`);
+      log("Correction", `${c.tracking} : n° fournisseur ${c.corrections.at(-1).ancien || "—"} → ${nouveau} (${d.motif})`);
+    });
+    closeModal(); toast(`Numéro de suivi corrigé : ${nouveau}`);
   },
   "rc-scan": form => { ajouterSuivis(splitTrackings(form.code.value)); },
   "rc-bulk": form => { ajouterSuivis(splitTrackings(form.bulk.value)); },

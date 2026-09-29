@@ -263,6 +263,12 @@ details textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line)
 .big-count { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 6px 0 4px; color: var(--ink-soft); }
 .big-count .num { font-size: 26px; font-weight: 800; color: var(--navy); margin-right: 6px; }
 
+/* ---------- Correction d'un numéro ---------- */
+.btn-fix { border: 1px solid var(--line); background: var(--card); color: var(--navy); border-radius: 6px; padding: 1px 7px; font-size: 12px; line-height: 1.5; vertical-align: 1px; }
+.btn-fix:hover { border-color: var(--orange); color: var(--orange); }
+.btn-fix:focus-visible { outline: 2px solid var(--orange); }
+.fix-input { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 15px; }
+
 /* ---------- Réception rapide ---------- */
 .cell-input { width: 100%; min-width: 150px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
 .cell-input.narrow { min-width: 64px; width: 76px; }

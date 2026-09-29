@@ -164,6 +164,16 @@ tapé à la main attend toujours la touche Entrée, et un numéro collé est
 enregistré tout de suite. Les douchettes qui envoient Entrée après le code
 fonctionnent aussi, sans doublon.
 
+## Corriger un numéro de suivi
+
+Le bouton **✎** à côté d'un numéro permet de le corriger : dans un transfert
+ou un lot de réception en cours de saisie, dans un transfert déjà enregistré
+(même clôturé) et sur la fiche d'un colis. On choisit un motif (faute de
+frappe, mauvais code-barres scanné, étiquette abîmée…). L'ancien numéro, la
+date et l'agent restent dans l'historique. Si le bon colis avait été scanné
+« hors bordereau » à l'arrivée, la ligne corrigée est fusionnée avec lui et
+passe en « Reçu ». Les doublons et les numéros déjà reçus sont refusés.
+
 ## Coordonnées de l'entreprise
 
 L'application ne contient le nom d'aucune entreprise : renseignez votre nom,
