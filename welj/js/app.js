@@ -119,7 +119,7 @@ function sidebar(active) {
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">W</div>
-      <div><div class="brand-name">WELJ Express</div><div class="brand-sub">Gestion logistique</div></div>
+      <div><div class="brand-name">Manager Logistique</div><div class="brand-sub">WELJ Express Services</div></div>
       <button class="nav-toggle" data-act="toggle-nav" aria-label="Menu">☰</button>
     </div>
     <nav class="navlinks">

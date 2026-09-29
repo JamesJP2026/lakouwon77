@@ -1,5 +1,5 @@
 /* =========================================================
-   STOCKAGE — WELJ Express Manager
+   STOCKAGE — Manager Logistique
    Toutes les données vivent dans un seul objet `db`, persisté
    dans localStorage. Ce module est la seule porte d'accès aux
    données : pour passer plus tard à une base partagée (Supabase,

@@ -1,4 +1,4 @@
-# WELJ Express Manager
+# Manager Logistique — WELJ Express Services
 
 Application de gestion de la chaîne logistique **Miami → Haïti** pour
 **WELJ Express Services** (welj-ht.com) : réception à l'entrepôt de
