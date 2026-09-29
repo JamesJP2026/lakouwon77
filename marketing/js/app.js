@@ -3,8 +3,13 @@ import {
   dateFr, dateCourte, totauxFacture, budgetActions, totalHonoraires,
 } from './store.js';
 import { SECTEURS, CANAUX, suggestions } from './secteurs.js';
+import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
 let data = load();
+data.plans.forEach(normaliserPlan);
+// Filtres des listes (conservés pendant la session).
+const filtres = { plans: { q: '', statut: '' }, factures: { q: '', statut: '' }, actions: { q: '', statut: 'ouvertes', plan: '' } };
+const contient = (txt, q) => !q || String(txt).toLowerCase().includes(q.toLowerCase());
 const $view = document.getElementById('view');
 const $modal = document.getElementById('modal');
 
@@ -82,7 +87,7 @@ function nouveauPlan({ clientId, titre, debut, fin, budgetPrevu, prefill }) {
     notes: '',
   };
   if (prefill && client) appliquerSuggestions(p, client.secteur, false);
-  return p;
+  return normaliserPlan(p);
 }
 
 // Remplit les champs vides avec les suggestions du secteur (n'écrase rien).
@@ -104,6 +109,7 @@ const NAV = [
   ['dashboard', '◧', 'Tableau de bord'],
   ['clients', '◉', 'Entreprises clientes'],
   ['plans', '✎', 'Plans marketing'],
+  ['actions', '☑', 'Suivi des actions'],
   ['factures', '▤', 'Factures'],
   ['parametres', '⚙', 'Paramètres'],
 ];
@@ -135,6 +141,9 @@ function viewDashboard() {
   const impayees = facts.filter(f => totauxFacture(f).reste > 0.005)
     .sort((a, b) => (a.echeance || '').localeCompare(b.echeance || ''));
   const recents = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || '')).slice(0, 6);
+  const semaine = addDays(todayISO(), 7);
+  const aSuivre = toutesActions().filter(({ a, p }) => a.statut !== 'termine' &&
+    (actionEnRetard(a, p) || (a.statut === 'a_faire' && (a.debut || p.debut) <= semaine)));
 
   const vide = !data.clients.length && !data.plans.length;
   return topbar('Tableau de bord', 'Vue d\'ensemble de vos plans marketing et de votre facturation',
@@ -151,6 +160,11 @@ function viewDashboard() {
       <div class="kpi pos"><div class="lbl">Encaissé</div><div class="val num">${money(encaisse)}</div></div>
       <div class="kpi ${aEncaisser > 0 ? 'neg' : ''}"><div class="lbl">Reste à encaisser</div><div class="val num">${money(aEncaisser)}</div><div class="sub">${impayees.length} facture(s) ouverte(s)</div></div>
     </div>
+    ${aSuivre.length ? `<div class="panel"><h3>Actions à suivre <span class="n">en retard ou à lancer cette semaine</span></h3>
+      <table><tbody>${aSuivre.slice(0, 8).map(({ a, p }) => `<tr class="rowlink" data-href="#/actions">
+        <td><b>${esc(a.canal)}</b> — ${esc(a.action)}<div class="muted">${esc(p.titre)} · ${esc(clientById(p.clientId)?.nom || '')}</div></td>
+        <td class="nowrap ${actionEnRetard(a, p) ? 'txt-red' : 'muted'}">${actionEnRetard(a, p) ? 'En retard · fin ' + dateCourte(a.fin || p.fin) : 'Début ' + dateCourte(a.debut || p.debut)}</td>
+        <td class="r">${badge(a.statut, STATUTS_ACTION)}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <div class="grid-2">
       <div class="panel"><h3>Plans récents</h3>
         ${recents.length ? `<table><tbody>${recents.map(p => `<tr class="rowlink" data-href="#/plan/${p.id}/infos">
@@ -209,17 +223,27 @@ function modalClient(id) {
     </form>`, true);
 }
 
+const barreFiltres = (liste, statuts, extra = '') => `<div class="filters no-print">
+  <input type="search" placeholder="Rechercher…" data-filter="${liste}.q" value="${esc(filtres[liste].q)}">
+  <select data-filter="${liste}.statut"><option value="">Tous les statuts</option>${Object.entries(statuts).map(([k, l]) => `<option value="${k}" ${filtres[liste].statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select>${extra}</div>`;
+
+const scoreBadge = n => `<span class="score ${n >= 80 ? 'good' : n >= 50 ? 'mid' : 'low'}" title="Qualité du plan">${n} %</span>`;
+
 function viewPlans() {
-  const plans = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || ''));
+  const f = filtres.plans;
+  const plans = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || ''))
+    .filter(p => (!f.statut || p.statut === f.statut) && contient(p.titre + ' ' + (clientById(p.clientId)?.nom || ''), f.q));
   return topbar('Plans marketing', 'Créez, présentez puis facturez vos plans marketing et publicitaires',
     `<button class="btn btn-primary" data-action="new-plan-for">+ Nouveau plan</button>`) +
+    (data.plans.length ? barreFiltres('plans', STATUTS_PLAN) : '') +
     (plans.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Plan</th><th>Période</th><th class="r">Budget actions</th><th class="r">Honoraires</th><th>Statut</th><th></th></tr></thead>
+      <thead><tr><th>Plan</th><th>Période</th><th class="r">Budget actions</th><th class="r">Honoraires</th><th class="c">Qualité</th><th>Statut</th><th></th></tr></thead>
       <tbody>${plans.map(p => `<tr>
         <td><b>${esc(p.titre)}</b><div class="muted">${esc(clientById(p.clientId)?.nom || '—')}</div></td>
         <td class="nowrap">${dateCourte(p.debut)} → ${dateCourte(p.fin)}</td>
         <td class="r num">${money(budgetActions(p))}</td>
         <td class="r num">${money(totalHonoraires(p))}</td>
+        <td class="c">${scoreBadge(scorePlan(p).score)}</td>
         <td>${badge(p.statut, STATUTS_PLAN)}</td>
         <td class="r nowrap">
           <a class="btn btn-sm" href="#/plan/${p.id}/infos">Modifier</a>
@@ -227,7 +251,48 @@ function viewPlans() {
           <button class="btn btn-sm" data-action="dup-plan" data-id="${p.id}" title="Dupliquer">⧉</button>
           <button class="btn btn-sm btn-danger" data-action="del-plan" data-id="${p.id}" title="Supprimer">✕</button>
         </td></tr>`).join('')}</tbody></table></div>`
-      : '<div class="panel muted">Aucun plan. Cliquez sur « Nouveau plan » pour commencer.</div>');
+      : `<div class="panel muted">${data.plans.length ? 'Aucun plan ne correspond à ces filtres.' : 'Aucun plan. Cliquez sur « Nouveau plan » pour commencer.'}</div>`);
+}
+
+// ---------- Suivi des actions (tous les plans) ----------
+const toutesActions = () => data.plans.filter(p => p.statut !== 'refuse')
+  .flatMap(p => p.actions.map((a, i) => ({ a, p, i })));
+
+function viewActions() {
+  const f = filtres.actions;
+  const all = toutesActions();
+  const retard = all.filter(({ a, p }) => actionEnRetard(a, p));
+  const list = all.filter(({ a, p }) => {
+    if (f.plan && p.id !== f.plan) return false;
+    if (f.statut === 'ouvertes' && a.statut === 'termine') return false;
+    if (f.statut === 'retard' && !actionEnRetard(a, p)) return false;
+    if (STATUTS_ACTION[f.statut] && a.statut !== f.statut) return false;
+    return contient(`${a.canal} ${a.action} ${a.responsable} ${p.titre} ${clientById(p.clientId)?.nom || ''}`, f.q);
+  }).sort((x, y) => (x.a.fin || x.p.fin || '').localeCompare(y.a.fin || y.p.fin || ''));
+  const compte = st => all.filter(({ a }) => a.statut === st).length;
+  return topbar('Suivi des actions', 'Toutes les actions de vos plans : qui fait quoi, quand, et avec quel résultat') + `
+    <div class="kpi-row">
+      <div class="kpi"><div class="lbl">À faire</div><div class="val">${compte('a_faire')}</div></div>
+      <div class="kpi"><div class="lbl">En cours</div><div class="val">${compte('en_cours')}</div></div>
+      <div class="kpi pos"><div class="lbl">Terminées</div><div class="val">${compte('termine')}</div></div>
+      <div class="kpi ${retard.length ? 'neg' : ''}"><div class="lbl">En retard</div><div class="val">${retard.length}</div></div>
+    </div>
+    <div class="filters no-print">
+      <input type="search" placeholder="Rechercher (canal, action, responsable, client…)" data-filter="actions.q" value="${esc(f.q)}">
+      <select data-filter="actions.statut">${[['ouvertes', 'Non terminées'], ['', 'Toutes'], ['retard', 'En retard'], ...Object.entries(STATUTS_ACTION)].map(([k, l]) => `<option value="${k}" ${f.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <select data-filter="actions.plan"><option value="">Tous les plans</option>${data.plans.map(p => `<option value="${p.id}" ${f.plan === p.id ? 'selected' : ''}>${esc(p.titre)} — ${esc(clientById(p.clientId)?.nom || '')}</option>`).join('')}</select>
+    </div>
+    ${list.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Action</th><th>Plan / client</th><th>Période</th><th>Responsable</th><th class="r">Budget / dépensé</th><th>Statut</th></tr></thead>
+      <tbody>${list.map(({ a, p, i }) => `<tr class="${actionEnRetard(a, p) ? 'late' : ''}">
+        <td><b>${esc(a.canal)}</b><div>${esc(a.action)}</div></td>
+        <td><a href="#/plan/${p.id}/resultats">${esc(p.titre)}</a><div class="muted">${esc(clientById(p.clientId)?.nom || '')}</div></td>
+        <td class="nowrap">${dateCourte(a.debut || p.debut)} → ${dateCourte(a.fin || p.fin)}${actionEnRetard(a, p) ? '<div class="txt-red">En retard</div>' : ''}</td>
+        <td>${esc(a.responsable || '—')}</td>
+        <td class="r num">${money(a.budget)}<div class="muted">${money(a.depense)}</div></td>
+        <td><select class="statut-select st-${a.statut}" data-action-change="action-statut" data-plan="${p.id}" data-i="${i}">${Object.entries(STATUTS_ACTION).map(([k, l]) => `<option value="${k}" ${a.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+      </tr>`).join('')}</tbody></table></div>`
+      : `<div class="panel muted">${all.length ? 'Aucune action ne correspond à ces filtres.' : 'Aucune action : ajoutez des actions dans l\'étape « Actions & budget » d\'un plan.'}</div>`}`;
 }
 
 function modalNouveauPlan(clientId = '') {
@@ -257,6 +322,7 @@ const STEPS = [
   ['actions', 'Actions & budget'],
   ['suivi', 'Suivi & KPIs'],
   ['honoraires', 'Honoraires'],
+  ['resultats', 'Résultats & pilotage'],
 ];
 
 const inp = (bind, val, attrs = '') => `<input data-bind="${bind}" value="${esc(val)}" ${attrs}>`;
@@ -345,7 +411,8 @@ function stepContent(p, step) {
           <td><button class="btn btn-sm btn-danger" data-action="del-row" data-list="actions" data-i="${i}">✕</button></td></tr>`).join('')}</tbody>
         <tfoot><tr><td colspan="4" class="r"><b>Total des actions</b></td><td class="num"><b data-live="budgetTotal">${money(total)}</b></td><td colspan="2" class="muted" data-live="budgetEcart">${ecartBudget(p)}</td></tr></tfoot>
       </table></div>
-      <button class="btn btn-sm" data-action="add-row" data-list="actions">+ Ajouter une action</button>
+      <div class="row-btns"><button class="btn btn-sm" data-action="add-row" data-list="actions">+ Ajouter une action</button>
+      ${num(p.budgetPrevu) > 0 && p.actions.length ? `<button class="btn btn-sm" data-action="repartir-budget">⚖ Répartir le budget envisagé (${money(p.budgetPrevu)}) entre les actions</button>` : ''}</div>
       ${chips('actions', sug.actions, a => `${a.canal} : ${a.action}`)}`;
     }
     case 'suivi': return `
@@ -366,9 +433,61 @@ function stepContent(p, step) {
         <tfoot><tr><td colspan="3" class="r"><b>Total honoraires HT</b></td><td class="r num"><b data-live="honTotal">${money(totalHonoraires(p))}</b></td><td></td></tr></tfoot>
       </table></div>
       <button class="btn btn-sm" data-action="add-row" data-list="honoraires">+ Ajouter une prestation</button>
+      ${(data.settings.catalogue || []).length ? `<div class="chips"><span class="muted">Catalogue :</span>${data.settings.catalogue.map((c, i) =>
+        `<button class="chip" data-action="add-catalogue" data-i="${i}">+ ${esc(c.description)}${num(c.pu) ? ` · ${money(c.pu)}` : ''}</button>`).join('')}
+        <a class="muted" href="#/parametres">Modifier le catalogue</a></div>` : ''}
       <div class="form-grid" style="margin-top:16px">${field('Notes / conditions de la proposition', area('notes', p.notes, 'Validité de l\'offre, modalités, ce qui est inclus ou non…', 3), 'full')}</div>`;
+    case 'resultats': return `
+      <p class="muted">Pendant la campagne, notez ce qui a été dépensé et obtenu pour chaque action. Les indicateurs et les recommandations se mettent à jour automatiquement.</p>
+      <div data-live="resKpi">${resultatsKpi(p)}</div>
+      <h4>Résultats par action</h4>
+      <div class="table-wrap flat"><table class="edit">
+        <thead><tr><th>Action</th><th style="width:120px">Statut</th><th style="width:110px" class="r">Budget prévu</th><th style="width:115px">Dépensé</th><th style="width:105px">Personnes touchées</th><th style="width:95px">Prospects</th><th style="width:120px">Ventes générées</th></tr></thead>
+        <tbody>${p.actions.map((a, i) => `<tr class="${actionEnRetard(a, p) ? 'late' : ''}">
+          <td><b>${esc(a.canal)}</b><div class="muted">${esc(a.action)}</div></td>
+          <td><select data-bind="actions.${i}.statut">${Object.entries(STATUTS_ACTION).map(([k, l]) => `<option value="${k}" ${a.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+          <td class="r num">${money(a.budget)}</td>
+          <td>${numInp(`actions.${i}.depense`, a.depense)}</td><td>${numInp(`actions.${i}.portee`, a.portee)}</td>
+          <td>${numInp(`actions.${i}.prospects`, a.prospects)}</td><td>${numInp(`actions.${i}.ventes`, a.ventes)}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Aucune action dans ce plan.</td></tr>'}</tbody>
+      </table></div>
+      ${p.objectifs.length ? `<h4>Avancement des objectifs</h4>
+      <div class="table-wrap flat"><table class="edit">
+        <thead><tr><th>Objectif</th><th style="width:110px">Cible</th><th style="width:150px">Valeur actuelle</th><th style="width:230px">Atteint (%)</th></tr></thead>
+        <tbody>${p.objectifs.map((o, i) => `<tr><td>${esc(o.objectif)}<div class="muted">${esc(o.indicateur)}</div></td><td>${esc(o.cible)}</td>
+          <td>${inp(`objectifs.${i}.actuel`, o.actuel)}</td>
+          <td><div class="prog-in"><input type="range" min="0" max="100" step="5" data-bind="objectifs.${i}.progression" data-type="num" value="${num(o.progression)}"><b data-live="prog-${i}">${num(o.progression)} %</b></div></td></tr>`).join('')}</tbody>
+      </table></div>` : ''}
+      <h4>Recommandations</h4>
+      <div data-live="resRecos">${recosHtml(p)}</div>
+      <div class="form-grid" style="margin-top:16px">
+        ${field('Bilan et prochaines étapes (pour le client)', area('bilan', p.bilan, 'Ce qui a fonctionné, ce qui sera ajusté le mois prochain…', 4), 'full')}
+        <label class="check full"><input type="checkbox" data-bind="afficherResultats" data-type="bool" ${p.afficherResultats ? 'checked' : ''}> Inclure les résultats dans la présentation (rapport pour le client)</label>
+      </div>`;
   }
   return '';
+}
+
+function resultatsKpi(p) {
+  const r = resultats(p);
+  const pct = r.budget ? Math.min(100, r.depense / r.budget * 100) : 0;
+  return `<div class="kpi-row compact">
+    <div class="kpi"><div class="lbl">Budget dépensé</div><div class="val num">${money(r.depense)}</div>
+      <div class="meter"><i style="width:${pct.toFixed(0)}%" class="${r.depense > r.budget && r.budget ? 'over' : ''}"></i></div><div class="sub">${Math.round(r.budget ? r.depense / r.budget * 100 : 0)} % de ${money(r.budget)}</div></div>
+    <div class="kpi"><div class="lbl">Prospects</div><div class="val">${fmt(r.prospects).replace(/,00$/, '')}</div><div class="sub">${r.prospects ? money(r.coutProspect) + ' / prospect' : '—'}</div></div>
+    <div class="kpi pos"><div class="lbl">Ventes générées</div><div class="val num">${money(r.ventes)}</div><div class="sub">${fmt(r.portee).replace(/,00$/, '')} personnes touchées</div></div>
+    <div class="kpi ${r.depense && r.roi < 0 ? 'neg' : r.depense ? 'pos' : ''}"><div class="lbl">Retour sur investissement</div><div class="val">${r.depense ? Math.round(r.roi) + ' %' : '—'}</div><div class="sub">(ventes − dépenses) / dépenses</div></div>
+    <div class="kpi ${r.enRetard ? 'neg' : ''}"><div class="lbl">Actions terminées</div><div class="val">${r.terminees} / ${r.nb}</div><div class="sub">${r.enRetard ? r.enRetard + ' en retard' : 'Objectifs atteints à ' + Math.round(r.progression) + ' %'}</div></div>
+  </div>`;
+}
+
+const recosHtml = p => `<ul class="recos">${recommandations(p, money).map(r => `<li class="${r.type}">${esc(r.texte)}</li>`).join('')}</ul>`;
+
+function scorePanel(p) {
+  const { score, conseils } = scorePlan(p);
+  return `<div class="score-head"><span>Qualité du plan</span>${scoreBadge(score)}</div>
+    <div class="meter"><i style="width:${score}%" class="${score >= 80 ? '' : score >= 50 ? 'mid' : 'over'}"></i></div>
+    ${conseils.length ? `<ul class="conseils">${conseils.slice(0, 5).map(c => `<li><a href="#/plan/${p.id}/${c.step}">${esc(c.texte)}</a></li>`).join('')}</ul>
+      ${conseils.length > 5 ? `<div class="muted">+ ${conseils.length - 5} autre(s) conseil(s)</div>` : ''}` : '<p class="muted">Plan complet 👍 Prêt à être présenté.</p>'}`;
 }
 
 function ecartBudget(p) {
@@ -385,14 +504,17 @@ function viewPlanEditor(p, step) {
     `${esc(clientById(p.clientId)?.nom || '')} · ${badge(p.statut, STATUTS_PLAN)}`,
     `<a class="btn" href="#/plans">← Plans</a><a class="btn btn-gold" href="#/plan/${p.id}/presentation">Voir la présentation →</a>`) + `
     <div class="editor">
-      <nav class="steps">${STEPS.map(([k, l], i) => `<a href="#/plan/${p.id}/${k}" class="step ${k === cur ? 'active' : ''}"><span class="n">${i + 1}</span>${l}</a>`).join('')}</nav>
+      <div class="editor-side">
+        <nav class="steps">${STEPS.map(([k, l], i) => `${k === 'resultats' ? '<div class="steps-sep">Après la présentation</div>' : ''}<a href="#/plan/${p.id}/${k}" class="step ${k === cur ? 'active' : ''}"><span class="n">${i + 1}</span>${l}</a>`).join('')}</nav>
+        <div class="panel score-panel" data-live="score">${scorePanel(p)}</div>
+      </div>
       <div class="panel step-body">
         <h3>${idx + 1}. ${curLabel}</h3>
         ${stepContent(p, cur)}
         <div class="step-nav">
           ${prev ? `<a class="btn" href="#/plan/${p.id}/${prev[0]}">← ${prev[1]}</a>` : '<span></span>'}
-          ${next ? `<a class="btn btn-primary" href="#/plan/${p.id}/${next[0]}">${next[1]} →</a>`
-                 : `<a class="btn btn-gold" href="#/plan/${p.id}/presentation">Présenter le plan →</a>`}
+          ${next && cur !== 'honoraires' ? `<a class="btn btn-primary" href="#/plan/${p.id}/${next[0]}">${next[1]} →</a>`
+                 : `<a class="btn btn-gold" href="#/plan/${p.id}/presentation">${cur === 'resultats' ? 'Voir le rapport' : 'Présenter le plan'} →</a>`}
         </div>
         <div class="saved muted">Enregistrement automatique</div>
       </div>
@@ -406,6 +528,9 @@ function updateLive(p) {
   set('budgetEcart', ecartBudget(p));
   set('honTotal', money(totalHonoraires(p)));
   p.honoraires.forEach((l, i) => set(`hon-${i}`, money(num(l.qte) * num(l.pu))));
+  p.objectifs.forEach((o, i) => set(`prog-${i}`, `${num(o.progression)} %`));
+  set('score', scorePanel(p));
+  if (document.querySelector('[data-live="resKpi"]')) { set('resKpi', resultatsKpi(p)); set('resRecos', recosHtml(p)); }
 }
 
 // ---------- Présentation ----------
@@ -500,6 +625,8 @@ function viewPresentation(p) {
 
     ${section(++n, 'Suivi des résultats', `${p.kpis ? `<h4>Indicateurs clés</h4>${liste(p.kpis)}` : ''}${para('Suivi et reporting', p.suivi)}${para('Risques et plan B', p.risques)}` || '<p class="muted">—</p>')}
 
+    ${p.afficherResultats ? section(++n, 'Résultats obtenus', rapportResultats(p)) : ''}
+
     ${section(++n, 'Notre proposition', p.honoraires.length ? `
       <table class="doc-table"><thead><tr><th>Prestation</th><th class="r">Qté</th><th class="r">Prix unitaire</th><th class="r">Total</th></tr></thead>
       <tbody>${p.honoraires.map(l => `<tr><td>${esc(l.description)}</td><td class="r">${fmt(l.qte).replace(/,00$/, '')}</td><td class="r num">${money(l.pu)}</td><td class="r num">${money(num(l.qte) * num(l.pu))}</td></tr>`).join('')}</tbody>
@@ -509,6 +636,24 @@ function viewPresentation(p) {
 
     <footer class="doc-foot">${esc(s.nom)}${s.adresse ? ` · ${esc(s.adresse)}` : ''}${s.telephone ? ` · ${esc(s.telephone)}` : ''}${s.email ? ` · ${esc(s.email)}` : ''}</footer>
   </article>`;
+}
+
+function rapportResultats(p) {
+  const r = resultats(p);
+  const cellules = [
+    ['Budget dépensé', `${money(r.depense)}<small>sur ${money(r.budget)}</small>`],
+    ['Personnes touchées', fmt(r.portee).replace(/,00$/, '')],
+    ['Prospects', `${fmt(r.prospects).replace(/,00$/, '')}${r.prospects ? `<small>${money(r.coutProspect)} / prospect</small>` : ''}`],
+    ['Ventes générées', money(r.ventes)],
+    ['Retour sur investissement', r.depense ? Math.round(r.roi) + ' %' : '—'],
+  ];
+  return `<div class="res-grid">${cellules.map(([l, v]) => `<div><span>${l}</span><b>${v}</b></div>`).join('')}</div>
+    ${p.actions.length ? `<table class="doc-table"><thead><tr><th>Action</th><th>Statut</th><th class="r">Dépensé</th><th class="r">Touchés</th><th class="r">Prospects</th><th class="r">Ventes</th></tr></thead>
+      <tbody>${p.actions.map(a => `<tr><td><b>${esc(a.canal)}</b><div class="muted">${esc(a.action)}</div></td><td>${STATUTS_ACTION[a.statut] || ''}</td>
+        <td class="r num">${money(a.depense)}</td><td class="r">${fmt(a.portee).replace(/,00$/, '')}</td><td class="r">${fmt(a.prospects).replace(/,00$/, '')}</td><td class="r num">${money(a.ventes)}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${p.objectifs.length ? `<h4>Avancement des objectifs</h4><div class="bars">${p.objectifs.map(o => `
+      <div class="bar-row"><span class="bar-lbl">${esc(o.objectif)}${o.actuel ? `<small>Actuel : ${esc(o.actuel)} · cible ${esc(o.cible)}</small>` : ''}</span><span class="bar"><i style="width:${Math.min(100, num(o.progression))}%"></i></span><span class="bar-val num">${Math.round(num(o.progression))} %</span></div>`).join('')}</div>` : ''}
+    ${para('Bilan et prochaines étapes', p.bilan)}`;
 }
 
 function modalGenFacture(p) {
@@ -530,6 +675,30 @@ function modalGenFacture(p) {
     </form>`);
 }
 
+function nouveauNumero(date) {
+  const s = data.settings;
+  const n = num(s.prochainNumero) || 1;
+  s.prochainNumero = n + 1;
+  return `${s.prefixeFacture || 'FAC'}-${date.slice(0, 4)}-${String(n).padStart(4, '0')}`;
+}
+
+function modalRelance(f) {
+  const c = clientById(f.clientId) || {};
+  const t = totauxFacture(f);
+  const s = data.settings;
+  const msg = `Bonjour${c.contact ? ' ' + c.contact : ''},\n\nSauf erreur de notre part, la facture ${f.numero} du ${dateCourte(f.date)} (${f.objet}) reste à régler : ${fmt(t.reste)} ${s.devise}, échéance le ${dateCourte(f.echeance)}.\n${s.mentions ? '\nModalités de paiement :\n' + s.mentions + '\n' : ''}\nMerci d'avance et belle journée,\n${s.nom}${s.telephone ? '\n' + s.telephone : ''}`;
+  const tel = String(c.telephone || '').replace(/\D/g, '');
+  openModal(`<h2>Relancer — ${esc(f.numero)}</h2>
+    <p class="muted">Message prêt à envoyer (modifiable) :</p>
+    <textarea id="relance-msg" rows="10">${esc(msg)}</textarea>
+    <div class="modal-actions wrap">
+      <button type="button" class="btn" data-action="copier-relance">Copier</button>
+      ${c.email ? `<a class="btn" data-relance="mail" data-sujet="Facture ${esc(f.numero)}" href="mailto:${esc(c.email)}" target="_blank" rel="noopener">Email</a>` : ''}
+      ${tel ? `<a class="btn btn-primary" data-relance="wa" href="https://wa.me/${tel}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+    </div>
+    ${!tel && !c.email ? '<p class="hint">Ajoutez le téléphone ou l\'email du client dans sa fiche pour l\'envoyer directement.</p>' : ''}`, true);
+}
+
 function creerFacture(p, opts) {
   let lignes = [];
   if (opts.honoraires) lignes.push(...p.honoraires.filter(l => l.description || num(l.pu)).map(l => ({ description: l.description, qte: num(l.qte), pu: num(l.pu) })));
@@ -547,13 +716,12 @@ function creerFacture(p, opts) {
   const s = data.settings;
   const date = opts.date || todayISO();
   const f = {
-    id: uid(), numero: `${s.prefixeFacture || 'FAC'}-${date.slice(0, 4)}-${String(num(s.prochainNumero) || 1).padStart(4, '0')}`,
+    id: uid(), numero: nouveauNumero(date),
     planId: p.id, clientId: p.clientId, date, echeance: addDays(date, num(opts.delai)),
     objet: `${opts.type === 'acompte' ? 'Acompte — ' : ''}${p.titre}`,
     lignes, remisePct: 0, tvaPct: num(s.tvaPct), montantPaye: 0, paiements: [], statut: 'brouillon',
     notes: s.conditions || '',
   };
-  s.prochainNumero = (num(s.prochainNumero) || 1) + 1;
   if (p.statut === 'brouillon') { p.statut = 'presente'; p.datePresentation = todayISO(); }
   data.factures.push(f);
   persist(true);
@@ -561,10 +729,17 @@ function creerFacture(p, opts) {
 }
 
 // ---------- Factures ----------
+const factureEnRetard = f => ['envoyee', 'partielle'].includes(f.statut) && f.echeance < todayISO();
+
 function viewFactures() {
-  const list = [...data.factures].sort((a, b) => (b.date + b.numero).localeCompare(a.date + a.numero));
+  const fl = filtres.factures;
+  const list = [...data.factures].sort((a, b) => (b.date + b.numero).localeCompare(a.date + a.numero))
+    .filter(f => (!fl.statut || (fl.statut === 'retard' ? factureEnRetard(f) : f.statut === fl.statut))
+      && contient(`${f.numero} ${f.objet} ${clientById(f.clientId)?.nom || ''}`, fl.q));
+  const tot = list.filter(f => f.statut !== 'annulee').reduce((a, f) => { const t = totauxFacture(f); a.total += t.total; a.reste += f.statut === 'brouillon' ? 0 : t.reste; return a; }, { total: 0, reste: 0 });
   return topbar('Factures', 'Générées à partir des plans présentés',
     `<button class="btn" data-action="new-facture-libre">+ Facture libre</button>`) +
+    (data.factures.length ? barreFiltres('factures', { ...STATUTS_FACT, retard: 'En retard de paiement' }) : '') +
     (list.length ? `<div class="table-wrap"><table>
       <thead><tr><th>Numéro</th><th>Client</th><th>Date</th><th>Échéance</th><th class="r">Total TTC</th><th class="r">Reste</th><th>Statut</th></tr></thead>
       <tbody>${list.map(f => {
@@ -575,9 +750,10 @@ function viewFactures() {
           <td>${esc(clientById(f.clientId)?.nom || '—')}</td><td>${dateCourte(f.date)}</td>
           <td class="${late ? 'txt-red' : ''}">${dateCourte(f.echeance)}</td>
           <td class="r num">${money(t.total)}</td><td class="r num">${f.statut === 'annulee' ? '—' : money(t.reste)}</td>
-          <td>${badge(f.statut, STATUTS_FACT)}</td></tr>`;
-      }).join('')}</tbody></table></div>`
-      : '<div class="panel muted">Aucune facture. Ouvrez un plan, présentez-le puis cliquez sur « Générer la facture ».</div>');
+          <td>${badge(f.statut, STATUTS_FACT)}${late ? ' <span class="badge st-refuse">En retard</span>' : ''}</td></tr>`;
+      }).join('')}</tbody>
+      <tfoot><tr><td colspan="4" class="r"><b>${list.length} facture(s)</b></td><td class="r num"><b>${money(tot.total)}</b></td><td class="r num"><b>${money(tot.reste)}</b></td><td></td></tr></tfoot></table></div>`
+      : `<div class="panel muted">${data.factures.length ? 'Aucune facture ne correspond à ces filtres.' : 'Aucune facture. Ouvrez un plan, présentez-le puis cliquez sur « Générer la facture ».'}</div>`);
 }
 
 function viewFacture(f) {
@@ -593,6 +769,8 @@ function viewFacture(f) {
     <button class="btn" data-action="print">🖨 Imprimer / PDF</button>
     ${edit ? `<button class="btn btn-danger" data-action="del-facture" data-id="${f.id}">Supprimer</button>
       <button class="btn btn-primary" data-action="emettre-facture" data-id="${f.id}">Valider et émettre</button>` : ''}
+    ${['envoyee', 'partielle'].includes(f.statut) ? `<button class="btn" data-action="relance" data-id="${f.id}">✉ Relancer</button>` : ''}
+    <button class="btn" data-action="dup-facture" data-id="${f.id}" title="Pour facturer à nouveau (ex. mois suivant)">⧉ Dupliquer</button>
     ${['envoyee', 'partielle'].includes(f.statut) ? `<button class="btn btn-gold" data-action="paiement" data-id="${f.id}">Enregistrer un paiement</button>
       <button class="btn btn-danger" data-action="annuler-facture" data-id="${f.id}">Annuler</button>` : ''}`;
 
@@ -689,6 +867,17 @@ function viewParametres() {
         <label class="full">Conditions de paiement par défaut<textarea data-sbind="conditions" rows="2">${esc(s.conditions)}</textarea></label>
         <label class="full">Mentions en bas de facture (coordonnées bancaires, MonCash…)<textarea data-sbind="mentions" rows="2">${esc(s.mentions)}</textarea></label>
       </div></div>
+    <div class="panel"><h3>Catalogue de prestations</h3>
+      <p class="muted">Vos prestations et tarifs habituels : ajoutez-les en un clic dans les honoraires d'un plan.</p>
+      <div class="table-wrap flat"><table class="edit">
+        <thead><tr><th>Prestation</th><th style="width:170px">Prix unitaire (${esc(s.devise)})</th><th></th></tr></thead>
+        <tbody>${(s.catalogue || []).map((c, i) => `<tr>
+          <td><input data-sbind="catalogue.${i}.description" value="${esc(c.description)}"></td>
+          <td><input data-sbind="catalogue.${i}.pu" data-type="num" type="number" min="0" step="any" value="${esc(c.pu)}"></td>
+          <td><button class="btn btn-sm btn-danger" data-action="del-catalogue" data-i="${i}">✕</button></td></tr>`).join('')}</tbody>
+      </table></div>
+      <button class="btn btn-sm" data-action="add-catalogue-ligne">+ Ajouter une prestation</button>
+    </div>
     <div class="panel"><h3>Sauvegarde</h3>
       <p class="muted">Les données sont enregistrées dans ce navigateur. Exportez régulièrement une sauvegarde, ou pour transférer vers un autre ordinateur.</p>
       <div class="topbar-actions">
@@ -708,9 +897,10 @@ function render() {
   if (route === 'clients') html = viewClients();
   else if (route === 'plans') { html = viewPlans(); if (id === 'nouveau') setTimeout(() => modalNouveauPlan(), 0); }
   else if (route === 'plan' && planById(id)) {
-    const p = planById(id); nav = 'plans'; current.plan = p;
+    const p = normaliserPlan(planById(id)); nav = 'plans'; current.plan = p;
     html = sub === 'presentation' ? viewPresentation(p) : viewPlanEditor(p, sub || 'infos');
   }
+  else if (route === 'actions') { data.plans.forEach(normaliserPlan); html = viewActions(); }
   else if (route === 'factures') html = viewFactures();
   else if (route === 'facture' && factureById(id)) { nav = 'factures'; current.facture = factureById(id); html = viewFacture(current.facture); }
   else if (route === 'parametres') html = viewParametres();
@@ -726,6 +916,13 @@ function rerenderKeepScroll() { const y = window.scrollY; render(); window.scrol
 document.addEventListener('click', e => {
   const row = e.target.closest('[data-href]');
   if (row && !e.target.closest('a,button,input,select')) { go(row.dataset.href); return; }
+  const lien = e.target.closest('[data-relance]');
+  if (lien) {
+    const txt = encodeURIComponent(document.getElementById('relance-msg')?.value || '');
+    const base = lien.href.split('?')[0];
+    lien.href = lien.dataset.relance === 'wa' ? `${base}?text=${txt}` : `${base}?subject=${encodeURIComponent(lien.dataset.sujet)}&body=${txt}`;
+    return;
+  }
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const a = el.dataset.action;
@@ -762,6 +959,35 @@ document.addEventListener('click', e => {
         data.factures = data.factures.filter(x => x.planId !== id);
         persist(true); render();
       }, 'Supprimer');
+      break;
+    }
+    case 'repartir-budget': {
+      const n = p.actions.length, total = num(p.budgetPrevu);
+      askConfirm(`Répartir ${fmt(total)} ${data.settings.devise} à parts égales entre les ${n} actions ? Les budgets actuels seront remplacés.`, () => {
+        const part = Math.floor(total / n / 100) * 100;
+        p.actions.forEach((a, i) => { a.budget = i === 0 ? total - part * (n - 1) : part; });
+        persist(true); rerenderKeepScroll(); toast('Budget réparti. Ajustez ensuite selon les priorités.');
+      }, 'Répartir');
+      break;
+    }
+    case 'add-catalogue': {
+      const c = data.settings.catalogue[+el.dataset.i];
+      p.honoraires.push({ description: c.description, qte: 1, pu: num(c.pu) }); persist(); rerenderKeepScroll(); break;
+    }
+    case 'add-catalogue-ligne': data.settings.catalogue.push({ description: '', pu: 0 }); persist(); rerenderKeepScroll(); break;
+    case 'del-catalogue': data.settings.catalogue.splice(+el.dataset.i, 1); persist(); rerenderKeepScroll(); break;
+    case 'relance': modalRelance(f); break;
+    case 'copier-relance': {
+      const ta = document.getElementById('relance-msg');
+      ta.select();
+      (navigator.clipboard?.writeText(ta.value) || Promise.reject()).then(() => toast('Message copié.'))
+        .catch(() => toast('Texte sélectionné : faites Ctrl+C pour le copier.'));
+      break;
+    }
+    case 'dup-facture': {
+      const date = todayISO();
+      const copy = { ...structuredClone(f), id: uid(), numero: nouveauNumero(date), date, echeance: addDays(date, num(data.settings.delaiPaiement)), statut: 'brouillon', montantPaye: 0, paiements: [] };
+      data.factures.push(copy); persist(true); go(`#/facture/${copy.id}`); toast(`Facture ${copy.numero} créée (brouillon).`);
       break;
     }
     case 'prefill': appliquerSuggestions(p, clientById(p.clientId)?.secteur); persist(); break;
@@ -865,18 +1091,27 @@ function handleForm(form) {
   } else if (kind === 'facture-libre') {
     const s = data.settings, date = todayISO();
     const f = {
-      id: uid(), numero: `${s.prefixeFacture || 'FAC'}-${date.slice(0, 4)}-${String(num(s.prochainNumero) || 1).padStart(4, '0')}`,
+      id: uid(), numero: nouveauNumero(date),
       planId: '', clientId: fd.clientId, date, echeance: addDays(date, num(s.delaiPaiement)), objet: fd.objet,
       lignes: [{ description: '', qte: 1, pu: 0 }], remisePct: 0, tvaPct: num(s.tvaPct), montantPaye: 0, paiements: [], statut: 'brouillon', notes: s.conditions || '',
     };
-    s.prochainNumero = (num(s.prochainNumero) || 1) + 1;
     data.factures.push(f); persist(true); closeModal(); go(`#/facture/${f.id}`);
   }
 }
 
 function onInput(e) {
   const el = e.target;
-  const val = el.dataset.type === 'num' ? num(el.value) : el.value;
+  if (el.dataset.filter) {
+    const [liste, cle] = el.dataset.filter.split('.');
+    filtres[liste][cle] = el.value;
+    const pos = el.selectionStart;
+    render();
+    // Garder le curseur dans le champ de recherche pendant la saisie.
+    const again = document.querySelector(`[data-filter="${el.dataset.filter}"]`);
+    if (again && el.type === 'search') { again.focus(); try { again.setSelectionRange(pos, pos); } catch { /* ignoré */ } }
+    return;
+  }
+  const val = el.dataset.type === 'num' ? num(el.value) : el.dataset.type === 'bool' ? el.checked : el.value;
   if (el.dataset.bind && current.plan) {
     setPath(current.plan, el.dataset.bind, val);
     persist(); updateLive(current.plan);
@@ -884,7 +1119,7 @@ function onInput(e) {
     setPath(current.facture, el.dataset.fbind, val);
     persist(); updateLiveFacture(current.facture);
   } else if (el.dataset.sbind) {
-    data.settings[el.dataset.sbind] = val;
+    setPath(data.settings, el.dataset.sbind, val);
     persist();
     if (el.dataset.sbind === 'nom') renderShell('parametres');
   }
@@ -895,7 +1130,10 @@ document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.bind === 'clientId') { onInput(e); return; }
   const a = el.dataset.actionChange;
-  if (a === 'plan-statut') {
+  if (a === 'action-statut') {
+    planById(el.dataset.plan).actions[+el.dataset.i].statut = el.value;
+    persist(true); rerenderKeepScroll(); toast('Statut mis à jour.');
+  } else if (a === 'plan-statut') {
     const p = planById(el.dataset.id); p.statut = el.value;
     if (p.statut !== 'brouillon' && !p.datePresentation) p.datePresentation = todayISO();
     persist(true); render();
@@ -943,6 +1181,16 @@ function chargerDemo() {
   p.ton = 'Chaleureux et familial';
   const budgets = [45000, 15000, 20000, 25000];
   p.actions.forEach((a, i) => { a.budget = budgets[i] || 10000; a.responsable = 'Agence'; });
+  // Résultats du premier mois, pour illustrer le suivi et les recommandations.
+  const res = [
+    { statut: 'en_cours', depense: 12000, portee: 18500, prospects: 140, ventes: 52000 },
+    { statut: 'en_cours', depense: 3000, portee: 900, prospects: 85, ventes: 38000 },
+    { statut: 'termine', depense: 20000, portee: 4000, prospects: 25, ventes: 9000 },
+    { statut: 'a_faire', depense: 0, portee: 0, prospects: 0, ventes: 0 },
+  ];
+  p.actions.forEach((a, i) => Object.assign(a, res[i] || {}));
+  p.objectifs.forEach((o, i) => { o.progression = [40, 55, 20][i] ?? 0; o.actuel = ['+10 %', '27', '+6 %'][i] ?? ''; });
+  p.bilan = 'Premier mois encourageant : WhatsApp génère des commandes à très faible coût. Les flyers coûtent cher pour peu de prospects : nous proposons de réaffecter une partie de ce budget vers WhatsApp et Facebook.';
   p.honoraires = [
     { description: 'Élaboration de la stratégie et du plan marketing', qte: 1, pu: 35000 },
     { description: 'Gestion des réseaux sociaux et des campagnes (par mois)', qte: 6, pu: 12000 },

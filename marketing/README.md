@@ -40,6 +40,35 @@ de bord crée un client et un plan complet pour découvrir l'application.
    Brouillon modifiable (lignes, remise, taxe, dates) → émise → paiements
    (espèces, virement, MonCash, NatCash…) → payée. Impression / PDF.
 
+## Obtenir plus de résultats
+
+- **Score de qualité du plan** (0-100 %), affiché dans l'éditeur et la liste
+  des plans, avec des conseils cliquables : objectifs non mesurables, budget
+  trop concentré sur un canal, actions sans responsable, budget dépassé…
+- **Étape 9 « Résultats & pilotage »** : pour chaque action, statut,
+  montant dépensé, personnes touchées, prospects et ventes générées ;
+  avancement de chaque objectif. Calcul automatique du budget consommé, du
+  coût par prospect et du retour sur investissement (ROI).
+- **Recommandations** tirées des résultats : canal le plus rentable où
+  réaffecter le budget, actions qui dépensent sans résultat, dépassements,
+  retards, ROI à exploiter pour proposer une hausse de budget.
+- **Rapport client** : les résultats peuvent être ajoutés à la présentation
+  (section « Résultats obtenus »), imprimable en PDF.
+
+## Options de gestion
+
+- **Suivi des actions** : toutes les actions de tous les plans, avec
+  compteurs (à faire, en cours, terminées, en retard), recherche, filtres
+  et changement de statut direct. Le tableau de bord signale les actions en
+  retard ou à lancer dans la semaine.
+- **Recherche et filtres** sur les plans et les factures (dont « en retard
+  de paiement »), avec totaux.
+- **Répartition automatique** du budget envisagé entre les actions.
+- **Catalogue de prestations** (Paramètres) : vos services et tarifs,
+  ajoutés en un clic dans les honoraires.
+- **Relance de facture** : message prêt à envoyer par WhatsApp ou email.
+- **Duplication de facture** (ex. facturation mensuelle).
+
 ## Fichiers
 
 ```
@@ -47,6 +76,7 @@ index.html        page unique
 styles.css        styles écran + impression
 js/app.js         vues, éditeur, présentation, factures, routeur
 js/store.js       stockage local, formatage, calcul des totaux
+js/analyse.js     score du plan, résultats, recommandations
 js/secteurs.js    suggestions par secteur d'activité et liste des canaux
 ```
 

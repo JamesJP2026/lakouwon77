@@ -204,10 +204,62 @@ blockquote .slogan{font-family:'Manrope'; font-size:19px; font-weight:800; color
 .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff; padding:11px 18px; border-radius:8px; font-size:13.5px; z-index:60; box-shadow:var(--shadow); max-width:calc(100% - 32px);}
 .toast.err{background:var(--red);}
 
+/* Filtres */
+.filters{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
+.filters input{flex:1; min-width:200px;}
+.filters select{width:auto; min-width:170px;}
+
+/* Score, jauges, recommandations */
+.score{display:inline-block; min-width:48px; text-align:center; padding:3px 8px; border-radius:20px; font-weight:800; font-size:12px; font-family:'Manrope';}
+.score.good{background:var(--green-bg); color:var(--green);}
+.score.mid{background:var(--amber-bg); color:var(--amber);}
+.score.low{background:var(--red-bg); color:var(--red);}
+.meter{height:8px; background:var(--paper); border-radius:5px; overflow:hidden; margin:8px 0 4px;}
+.meter i{display:block; height:100%; background:var(--green); border-radius:5px;}
+.meter i.mid{background:var(--amber);} .meter i.over{background:var(--red);}
+.editor-side{position:sticky; top:16px; display:flex; flex-direction:column; gap:12px;}
+.editor-side .steps{position:static;}
+.steps-sep{font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-soft); font-weight:700; padding:10px 10px 4px; border-top:1px solid var(--line); margin-top:4px;}
+.score-panel{padding:14px; margin:0;}
+.score-head{display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:13px;}
+.conseils{margin:8px 0 0; padding-left:16px; font-size:12px;}
+.conseils li{margin-bottom:6px;}
+.conseils a{color:var(--ink); text-decoration:none;}
+.conseils a:hover{text-decoration:underline;}
+.kpi-row.compact{grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:6px;}
+.kpi-row.compact .kpi{padding:12px 14px; box-shadow:none;}
+.kpi-row.compact .val{font-size:18px;}
+.recos{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;}
+.recos li{padding:9px 12px 9px 34px; border-radius:8px; position:relative; font-size:13px;}
+.recos li::before{position:absolute; left:12px; top:9px; font-weight:800;}
+.recos .ok{background:var(--green-bg);} .recos .ok::before{content:'✓'; color:var(--green);}
+.recos .warn{background:var(--amber-bg);} .recos .warn::before{content:'!'; color:var(--amber);}
+.recos .err{background:var(--red-bg);} .recos .err::before{content:'✕'; color:var(--red);}
+.recos .info{background:var(--blue-bg);} .recos .info::before{content:'i'; color:var(--blue);}
+.prog-in{display:flex; align-items:center; gap:10px;}
+.prog-in input{padding:0; accent-color:var(--gold);}
+.prog-in b{min-width:44px; text-align:right; font-size:13px;}
+.row-btns{display:flex; gap:8px; flex-wrap:wrap;}
+tr.late td{background:#fdf5f4;}
+.panel h3 .n{color:var(--ink-soft); font-weight:500; font-size:12px; margin-left:6px;}
+.st-a_faire{background:#eef0f4; color:var(--ink-soft);}
+.st-en_cours{background:var(--blue-bg); color:var(--blue);}
+.st-termine{background:var(--green-bg); color:var(--green);}
+.statut-select{width:auto; padding:5px 8px; font-size:12.5px; font-weight:700; border:none; border-radius:20px;}
+.modal-actions.wrap{flex-wrap:wrap;}
+.modal textarea#relance-msg{font-size:13px;}
+.res-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px;}
+.res-grid > div{background:var(--paper); border-radius:8px; padding:10px 12px;}
+.res-grid span{display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--ink-soft);}
+.res-grid b{font-family:'Manrope'; font-size:15px;}
+.res-grid small,.bar-lbl small{display:block; font-weight:400; font-size:11px; color:var(--ink-soft);}
+
 /* Mobile */
 @media (max-width:900px){
   .grid-2,.editor{grid-template-columns:1fr;}
   .steps{position:static; flex-direction:row; overflow-x:auto;}
+  .editor-side{position:static;} .steps-sep{display:none;}
+  .res-grid{grid-template-columns:1fr 1fr;}
   .step{white-space:nowrap;}
   .sidebar{position:fixed; left:-250px; transition:left .2s;}
   body.menu-open .sidebar{left:0; box-shadow:0 0 40px rgba(0,0,0,.3);}
