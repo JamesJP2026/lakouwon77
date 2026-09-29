@@ -108,6 +108,7 @@ export function numeroTracking(seq, date = new Date()) {
 }
 export const numeroManifeste = (seq, mode, date = new Date()) =>
   `${mode === "mer" ? "MS" : "MA"}-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
+export const numeroTransfert = (seq, date = new Date()) => `TR-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
 export const codeClient = seq => `WELJ-${pad(seq, 4)}`;
 export const numeroRecu = seq => `R-${pad(seq, 6)}`;
 

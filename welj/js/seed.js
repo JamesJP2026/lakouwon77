@@ -5,7 +5,7 @@
    valeurs d'exemple : à remplacer dans Paramètres par la
    grille officielle de la compagnie.
 ========================================================= */
-import { numeroTracking, numeroManifeste, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut } from "./logic.js";
+import { numeroTracking, numeroManifeste, numeroTransfert, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut } from "./logic.js";
 
 // Succursales ajoutées au réseau (Gonaïves et Saint-Marc : ouverture prochaine)
 const NOUVELLES_SUCCURSALES = [
@@ -60,9 +60,9 @@ const USERS = [
 export function seedData({ empty = false } = {}) {
   const settings = defaultSettings();
   const db = {
-    version: 7, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
-    seq: { client: 0, colis: 0, manifeste: 0, recu: 0 },
-    clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [],
+    version: 8, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
+    seq: { client: 0, colis: 0, manifeste: 0, recu: 0, transfert: 0 },
+    clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [], transferts: [],
   };
   if (empty) return db;
 
@@ -176,6 +176,24 @@ export function seedData({ empty = false } = {}) {
     }
   });
   db.manifestes.forEach(m => { const dep = m.etapes.find(e => e.action === "depart"); if (dep?.reel) enregistrerVoyage(m, db.colis, dep.reel); });
+  // Transferts entre bureaux (bordereaux) : reçu complet, incomplet, partiel en retard, en route
+  const trk = db.colis.filter(c => ["livre", "pret"].includes(c.statut));
+  const ext = () => "1Z" + Math.floor(rnd() * 9e15 + 1e15).toString(36).toUpperCase();
+  const tr = (orig, dest, envoiJ, lignes, recus, cloture, chauffeur) => {
+    const seq = ++db.seq.transfert; const env = new Date(now - envoiJ * day);
+    const t = {
+      id: "t" + seq, numero: numeroTransfert(seq, env), origine: orig, destination: dest, dateEnvoi: env.toISOString(),
+      chauffeur, vehicule: pick(["Camion AA-12345", "Pick-up AB-40218", "Moto AC-7781"]), note: "", user: "u-pap", createdAt: env.toISOString(),
+      lignes: lignes.map((x, i) => ({ tracking: x.tracking || x, colisId: x.id || null, recu: i < recus, dateReception: i < recus ? new Date(env.getTime() + (0.4 + rnd() * .8) * day).toISOString() : null,
+        recuPar: i < recus ? "u-pap" : null, horsListe: false, manquant: cloture && i >= recus })),
+      cloture: cloture ? new Date(env.getTime() + 1.3 * day).toISOString() : null,
+    };
+    db.transferts.push(t);
+  };
+  tr("PAP", "JER", 6, [trk[0], trk[1], ext()], 3, true, "Wilner (chauffeur)");
+  tr("PAP", "CAY", 4, [trk[2], trk[3], ext(), ext()], 3, true, "Ricardo (chauffeur)");
+  tr("RFT", "PAP", 2.6, [trk[4] || ext(), ext()], 1, false, "Stanley (moto)");
+  tr("PAP", "TAB", 0.1, [trk[5] || ext(), ext(), ext()], 0, false, "Frantz (chauffeur)");
   db.journal.push({ id: "j0", date: new Date().toISOString(), user: "u-admin", action: "Initialisation", details: "Données de démonstration chargées" });
   return db;
 }
@@ -248,6 +266,11 @@ export function migrate(db) {
     // Registre des voyages : enregistre les envois déjà partis
     db.manifestes.forEach(m => { const dep = (m.etapes || []).find(e => e.action === "depart"); if (dep?.reel && !m.bilan) enregistrerVoyage(m, db.colis, dep.reel); });
     db.version = 7;
+  }
+  if (db.version < 8) {
+    db.transferts = db.transferts || [];
+    db.seq.transfert = db.seq.transfert || 0;
+    db.version = 8;
   }
   return db;
 }

@@ -252,6 +252,15 @@ li.click { cursor: pointer; }
 li.click:hover { background: #f6f8fc; }
 .nowrap { white-space: nowrap; }
 
+/* ---------- Transferts entre bureaux ---------- */
+.scan-input { flex: 1; min-width: 0; padding: 11px 13px; border: 2px solid var(--navy); border-radius: 8px; font-size: 15px; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.scan-input:focus { outline: 3px solid var(--orange-soft); border-color: var(--orange); }
+.mt-s { margin-top: 10px; }
+details summary.link { cursor: pointer; color: var(--info); font-size: 13px; }
+details textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.big-count { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 6px 0 4px; color: var(--ink-soft); }
+.big-count .num { font-size: 26px; font-weight: 800; color: var(--navy); margin-right: 6px; }
+
 /* ---------- Mobile ---------- */
 @media (max-width: 960px) {
   #app { flex-direction: column; }

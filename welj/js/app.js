@@ -7,7 +7,7 @@ import * as store from "./store.js";
 import {
   STATUTS, statut, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode,
   CATEGORIES, calculerFacture, poidsVolumetrique, round, money, htg, num, fdate, fdatetime,
-  numeroTracking, numeroManifeste, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER,
+  numeroTracking, numeroManifeste, numeroTransfert, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER,
   TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,
 } from "./logic.js";
 import { syncDatesManifeste, bilanManifeste, enregistrerVoyage } from "./seed.js";
@@ -15,9 +15,9 @@ import { esc, $, $$, openModal, closeModal, confirmBox, toast, formData, opt, pr
 
 /* ---------- Rôles & navigation ---------- */
 const ROLES = {
-  admin:    { label: "Administrateur",      pages: ["dashboard", "acheminement", "reception", "colis", "manifestes", "comptoir", "clients", "caisse", "suivi", "rapports", "parametres"] },
-  entrepot: { label: "Agent entrepôt Miami", pages: ["dashboard", "acheminement", "reception", "colis", "manifestes", "clients", "suivi"] },
-  comptoir: { label: "Agent comptoir Haïti", pages: ["dashboard", "acheminement", "colis", "comptoir", "clients", "caisse", "suivi"] },
+  admin:    { label: "Administrateur",      pages: ["dashboard", "acheminement", "reception", "colis", "manifestes", "transferts", "comptoir", "clients", "caisse", "suivi", "rapports", "parametres"] },
+  entrepot: { label: "Agent entrepôt Miami", pages: ["dashboard", "acheminement", "reception", "colis", "manifestes", "transferts", "clients", "suivi"] },
+  comptoir: { label: "Agent comptoir Haïti", pages: ["dashboard", "acheminement", "colis", "transferts", "comptoir", "clients", "caisse", "suivi"] },
   livreur:  { label: "Livreur",             pages: ["comptoir", "suivi"] },
 };
 const NAV = [
@@ -26,6 +26,7 @@ const NAV = [
   { id: "reception",  label: "Réception entrepôt",   ic: "⇲" },
   { id: "colis",      label: "Colis",                ic: "▣" },
   { id: "manifestes", label: "Voyages / Manifestes", ic: "✈" },
+  { id: "transferts", label: "Transferts bureaux",   ic: "⇆" },
   { id: "comptoir",   label: "Retrait & livraison",  ic: "⇱" },
   { id: "clients",    label: "Clients",              ic: "☺" },
   { id: "caisse",     label: "Caisse & paiements",   ic: "$" },
@@ -71,6 +72,7 @@ const enCours = m => (m.etapes || []).some(e => !e.reel);
 /** Valeur pour <input type="datetime-local"> au fuseau local. */
 const dtLocal = iso => { if (!iso) return ""; const d = new Date(iso); return `${dayKey(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 const joursTxt = j => `${num(Math.abs(j), 1)} j`;
+const dureeTxt = ms => ms < 86400000 ? `${Math.max(0, Math.round(ms / 3600000))} h` : `${num(ms / 86400000, 1)} j`;
 const badge = id => { const s = statut(id); return `<span class="badge tone-${s.tone}">${esc(s.label)}</span>`; };
 const badgeM = id => { const s = statutManifeste(id); return `<span class="badge tone-${s.tone}">${esc(s.label)}</span>`; };
 const clientLabel = c => c ? `${c.code} — ${c.nom}` : "—";
@@ -101,6 +103,9 @@ const ui = {
   manifestes: { statut: "", mode: "", mois: "" },
   acheminement: { mode: "", vue: "encours" },
   comptoir: { tab: "pret", branche: "" },
+  transferts: { statut: "", bureau: "", q: "" },
+  transfert: null, // brouillon du nouveau bordereau
+  scanMsg: null,
   caisse: { du: dayKey(), au: dayKey() },
   rapports: { mois: monthKey(new Date()) },
   suivi: { q: "" },
@@ -135,7 +140,7 @@ function render() {
   if (focus) { const el = $(`[data-filter="${focus.key}"]`); if (el) { el.focus(); try { el.setSelectionRange(focus.pos, focus.pos); } catch { /* select */ } } }
   VIEW_MOUNT[page]?.(id);
 }
-window.addEventListener("hashchange", () => { ui.navOpen = false; render(); window.scrollTo(0, 0); });
+window.addEventListener("hashchange", () => { ui.navOpen = false; ui.scanMsg = null; render(); window.scrollTo(0, 0); });
 store.onChange(() => render());
 
 function sidebar(active) {
@@ -225,6 +230,19 @@ function badgeRetard(m) {
 /** Quantités du voyage : figées au départ, sinon calculées sur le chargement en cours. */
 const bilanOf = m => m.bilan || bilanManifeste(m, db.colis);
 const dateEnvoi = m => m.bilan?.dateEnvoi || m.dateDepart;
+/* ---------- Transferts entre bureaux ---------- */
+const STATUTS_TRANSFERT = {
+  envoye: { label: "En route", tone: "accent" }, partiel: { label: "Réception partielle", tone: "warn" },
+  recu: { label: "Tout reçu", tone: "good" }, incomplet: { label: "Incomplet — manquants", tone: "bad" },
+};
+const transfertOf = id => (db.transferts || []).find(t => t.id === id);
+const statutTransfert = t => t.cloture ? (t.lignes.some(l => l.manquant) ? "incomplet" : "recu")
+  : t.lignes.length && t.lignes.every(l => l.recu) ? "recu" : t.lignes.some(l => l.recu) ? "partiel" : "envoye";
+const badgeT = t => { const s = STATUTS_TRANSFERT[statutTransfert(t)]; return `<span class="badge tone-${s.tone}">${esc(s.label)}</span>`; };
+const transfertOuvert = t => !t.cloture && !t.lignes.every(l => l.recu);
+/** Retrouve un colis du système par n° WELJ ou n° fournisseur. */
+const findColis = code => { const c = String(code || "").trim().toUpperCase(); return c ? db.colis.find(x => x.tracking.toUpperCase() === c || String(x.trackingFournisseur || "").toUpperCase() === c) : null; };
+const splitTrackings = txt => String(txt || "").split(/[\s,;]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
 const transportInfo = m => [m.mode === "mer" ? m.navire : m.vol, m.conteneur ? "Cont. " + m.conteneur : ""].filter(Boolean).join(" · ");
 
 /* =========================================================
@@ -247,6 +265,7 @@ VIEWS.dashboard = () => {
   const exceptions = by(["probleme"]);
   const stockage = C.filter(c => c.statut === "pret" && daysAgo(lastEventDate(c)) > 7);
   const envoisRetard = db.manifestes.filter(m => retardManifeste(m) > 0);
+  const transfertsLents = (db.transferts || []).filter(t => transfertOuvert(t) && daysAgo(t.dateEnvoi) > 2);
 
   // Encaissements par semaine (8 semaines)
   const weeks = [];
@@ -290,7 +309,8 @@ VIEWS.dashboard = () => {
     </section>
     <section class="panel">
       <h3>Alertes</h3>
-      ${exceptions.length || stockage.length || envoisRetard.length ? `<ul class="alerts">
+      ${exceptions.length || stockage.length || envoisRetard.length || transfertsLents.length ? `<ul class="alerts">
+        ${transfertsLents.map(t => `<li class="alert warn" data-href="transferts/${t.id}"><b>Transfert</b> ${esc(t.numero)} ${esc(t.origine)} → ${esc(t.destination)} envoyé il y a ${Math.floor(daysAgo(t.dateEnvoi))} jours : ${t.lignes.filter(l => !l.recu).length} colis pas encore confirmés reçus</li>`).join("")}
         ${envoisRetard.map(m => { const e = (m.etapes || []).find(x => retardEtape(x)); return `<li class="alert bad" data-href="manifestes/${m.id}"><b>Retard ${modeIc(m.mode)}</b> ${esc(m.numero)} — ${esc(actionEtape(e.action).short)} à ${esc(pointOf(e.pointId).nom)} prévu le ${fdate(e.prevu)} (${joursTxt(retardEtape(e))})</li>`; }).join("")}
         ${exceptions.map(c => `<li class="alert bad" data-href="colis/${c.id}"><b>Exception</b> ${esc(c.tracking)} — ${esc(c.notes || "à vérifier")}</li>`).join("")}
         ${stockage.map(c => `<li class="alert warn" data-href="colis/${c.id}"><b>Stockage</b> ${esc(c.tracking)} prêt depuis ${Math.floor(daysAgo(lastEventDate(c)))} jours — ${esc(clientOf(c.clientId)?.nom || "")}</li>`).join("")}
@@ -523,6 +543,7 @@ function colisDetail(id) {
   const sol = soldeColis(c);
   const nexts = nextStatuts(c.statut);
   const notifs = db.notifications.filter(n => n.colisId === c.id);
+  const trs = (db.transferts || []).filter(t => t.lignes.some(l => l.colisId === c.id || l.tracking === c.tracking.toUpperCase()));
   return `
   ${topbar(`Colis <span class="mono">${esc(c.tracking)}</span>`, `${badge(c.statut)} &nbsp; ${esc(c.description)} — ${esc(cl?.nom || "")}`, `
     <a class="btn" href="#/colis">← Liste</a>
@@ -566,6 +587,7 @@ function colisDetail(id) {
       </table>
     </section>
     <section class="panel">
+      ${trs.length ? `<h3>Transferts entre bureaux</h3><ul class="plain">${trs.map(t => { const l = t.lignes.find(x => x.colisId === c.id || x.tracking === c.tracking.toUpperCase()); return `<li><a class="mono" href="#/transferts/${t.id}">${esc(t.numero)}</a> ${esc(t.origine)} → ${esc(t.destination)} · envoyé ${fdatetime(t.dateEnvoi)} · ${l.recu ? `<span class="text-good">reçu ${fdatetime(l.dateReception)}</span>` : l.manquant ? '<span class="text-bad">manquant</span>' : "en route"}</li>`; }).join("")}</ul>` : ""}
       <h3>Notifications envoyées</h3>
       ${notifs.length ? `<ul class="plain">${notifs.map(n => `<li><span class="muted small">${fdatetime(n.date)} · ${esc(n.canal)}</span><br>${esc(n.message)}</li>`).join("")}</ul>` : empty("Aucune notification pour ce colis.")}
     </section>
@@ -725,6 +747,130 @@ VIEWS.comptoir = () => {
       </div>
     </div>`; }).join("")}</div>` : empty("Aucun colis dans cette file.")}`;
 };
+
+/* ---------- Transferts entre bureaux (bordereaux) ---------- */
+VIEWS.transferts = id => id === "nouveau" ? transfertNouveau() : id ? transfertDetail(id) : transfertsListe();
+
+function transfertsListe() {
+  const f = ui.transferts; const q = f.q.trim().toUpperCase();
+  const all = db.transferts || [];
+  const list = all.filter(t => (!f.statut || statutTransfert(t) === f.statut) && (!f.bureau || t.origine === f.bureau || t.destination === f.bureau)
+    && (!q || t.numero.toUpperCase().includes(q) || t.lignes.some(l => l.tracking.includes(q))))
+    .sort((a, b) => b.dateEnvoi.localeCompare(a.dateEnvoi));
+  const ouverts = all.filter(transfertOuvert);
+  const attente = ouverts.reduce((s, t) => s + t.lignes.filter(l => !l.recu).length, 0);
+  const manquants = all.reduce((s, t) => s + t.lignes.filter(l => l.manquant).length, 0);
+  return `
+  ${topbar("Transferts entre bureaux", "Entrez les numéros de tracking envoyés à un autre bureau, puis vérifiez à l'arrivée que tout est bien reçu",
+    `<button class="btn" data-act="export-transferts">Exporter CSV</button><a class="btn btn-primary" href="#/transferts/nouveau">+ Nouveau transfert</a>`)}
+  <div class="kpi-row">
+    ${kpi("Transferts en route", ouverts.length, `${ouverts.filter(t => daysAgo(t.dateEnvoi) > 2).length} depuis plus de 2 jours`, ouverts.some(t => daysAgo(t.dateEnvoi) > 2) ? "warn" : "")}
+    ${kpi("Colis en attente de confirmation", attente)}
+    ${kpi("Transferts complets", all.filter(t => statutTransfert(t) === "recu").length, "", "good")}
+    ${kpi("Colis manquants", manquants, `${all.filter(t => statutTransfert(t) === "incomplet").length} transfert(s) incomplet(s)`, manquants ? "bad" : "")}
+  </div>
+  <div class="filters">
+    <input class="search" type="search" placeholder="Retrouver un tracking ou un n° de transfert…" data-filter="transferts.q" value="${esc(f.q)}">
+    <select data-filter="transferts.bureau" aria-label="Bureau">${opt("", "Tous les bureaux")}${S().succursales.map(b => opt(b.id, b.nom, b.id === f.bureau)).join("")}</select>
+    <select data-filter="transferts.statut" aria-label="Statut">${opt("", "Tous les statuts")}${Object.entries(STATUTS_TRANSFERT).map(([k, v]) => opt(k, v.label, k === f.statut)).join("")}</select>
+  </div>
+  ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>N°</th><th>Date d'envoi</th><th>De → vers</th><th>Chauffeur / véhicule</th><th class="r">Colis</th><th class="r">Reçus</th><th class="r">Manquants</th><th>Dernière réception</th><th>Statut</th></tr></thead><tbody>
+    ${list.map(t => { const r = t.lignes.filter(l => l.recu); const last = r.map(l => l.dateReception).sort().at(-1); return `<tr class="click" data-href="transferts/${t.id}">
+      <td class="mono">${esc(t.numero)}</td><td class="nowrap">${fdatetime(t.dateEnvoi)}</td>
+      <td><b>${esc(branch(t.origine)?.nom || t.origine)}</b> → <b>${esc(branch(t.destination)?.nom || t.destination)}</b></td>
+      <td>${esc(t.chauffeur || "")}<div class="muted small">${esc(t.vehicule || "")}</div></td>
+      <td class="num r">${t.lignes.length}</td><td class="num r">${r.length}</td><td class="num r ${t.lignes.some(l => l.manquant) ? "text-bad" : ""}">${t.lignes.filter(l => l.manquant).length || "—"}</td>
+      <td class="nowrap">${last ? fdatetime(last) : "—"}</td><td>${badgeT(t)}${transfertOuvert(t) && daysAgo(t.dateEnvoi) > 2 ? ' <span class="badge tone-bad">⚠ ' + Math.floor(daysAgo(t.dateEnvoi)) + " j</span>" : ""}</td></tr>`; }).join("")}
+  </tbody></table></div>` : empty("Aucun transfert.")}`;
+}
+
+function transfertNouveau() {
+  const u = me();
+  if (!ui.transfert) ui.transfert = { origine: u.succursale || "PAP", destination: "", dateEnvoi: dtLocal(store.nowIso()), chauffeur: "", vehicule: "", note: "", lignes: [] };
+  const d = ui.transfert;
+  const bureaux = sel => S().succursales.map(b => opt(b.id, b.nom + (b.actif === false ? " (bientôt)" : ""), b.id === sel)).join("");
+  return `
+  ${topbar("Nouveau transfert", "Bordereau d'envoi vers un autre bureau", `<a class="btn" href="#/transferts">← Transferts</a>`)}
+  <div class="grid-2 wide-left">
+    <section class="panel">
+      <h3>1. Numéros de tracking envoyés</h3>
+      <form data-form="tf-scan" class="row-inline">
+        <input name="code" class="scan-input" placeholder="Scanner ou taper un tracking puis Entrée" aria-label="Tracking" autocomplete="off">
+        <button class="btn btn-primary">Ajouter</button>
+      </form>
+      ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone} mt-s">${esc(ui.scanMsg.text)}</div>` : ""}
+      <details class="mt-s"><summary class="link">Coller plusieurs numéros d'un coup</summary>
+        <form data-form="tf-bulk"><textarea name="bulk" rows="4" placeholder="Un numéro par ligne (ou séparés par des espaces / virgules)"></textarea>
+        <button class="btn btn-sm mt-s">Ajouter la liste</button></form>
+      </details>
+      <div class="table-wrap mt">${d.lignes.length ? `<table class="tbl"><thead><tr><th>#</th><th>Tracking</th><th>Colis dans le système</th><th></th></tr></thead><tbody>
+        ${d.lignes.map((l, i) => { const c = colisOf(l.colisId); return `<tr><td>${d.lignes.length - i}</td><td class="mono">${esc(l.tracking)}</td>
+          <td>${c ? `${esc(clientOf(c.clientId)?.nom || "")} — ${esc(c.description)} <span class="muted small">(${esc(c.destination)})</span> ${badge(c.statut)}` : '<span class="muted">Non enregistré — sera suivi par son numéro</span>'}</td>
+          <td><button class="btn btn-sm btn-danger" data-act="tf-remove" data-id="${esc(l.tracking)}" aria-label="Retirer ${esc(l.tracking)}">✕</button></td></tr>`; }).join("")}
+      </tbody></table>` : empty("Aucun tracking ajouté. Scannez les colis un par un.")}</div>
+    </section>
+    <aside>
+      <form class="panel sticky" data-form="tf-save">
+        <h3>2. Envoi</h3>
+        <div class="form-grid">
+          <div class="field"><label>Bureau d'envoi</label><select name="origine" data-draft="origine">${bureaux(d.origine)}</select></div>
+          <div class="field"><label>Bureau destinataire *</label><select name="destination" data-draft="destination" required>${opt("", "— Choisir —")}${bureaux(d.destination)}</select></div>
+        </div>
+        <div class="field"><label>Date et heure d'envoi</label><input type="datetime-local" name="dateEnvoi" data-draft="dateEnvoi" value="${esc(d.dateEnvoi)}" required></div>
+        <div class="form-grid">
+          <div class="field"><label>Chauffeur / coursier</label><input name="chauffeur" data-draft="chauffeur" value="${esc(d.chauffeur)}"></div>
+          <div class="field"><label>Véhicule / plaque</label><input name="vehicule" data-draft="vehicule" value="${esc(d.vehicule)}"></div>
+        </div>
+        <div class="field"><label>Note</label><input name="note" data-draft="note" value="${esc(d.note)}"></div>
+        <div class="big-count"><span class="num">${d.lignes.length}</span> colis sur ce bordereau</div>
+        <div class="form-actions">
+          <button type="button" class="btn" data-act="tf-reset">Vider</button>
+          <button class="btn btn-primary" ${d.lignes.length ? "" : "disabled"}>Enregistrer l'envoi</button>
+        </div>
+      </form>
+    </aside>
+  </div>`;
+}
+VIEW_MOUNT.transferts = id => { $("[data-form=tf-scan] input, [data-form=tf-recv] input")?.focus(); };
+
+function transfertDetail(id) {
+  const t = transfertOf(id);
+  if (!t) return topbar("Transfert introuvable") + empty(`<a href="#/transferts">← Retour</a>`);
+  const recus = t.lignes.filter(l => l.recu);
+  const last = recus.map(l => l.dateReception).sort().at(-1);
+  const ouvert = !t.cloture;
+  const etat = l => l.horsListe ? '<span class="badge tone-warn">Reçu hors bordereau</span>' : l.recu ? '<span class="badge tone-good">✓ Reçu</span>' : l.manquant ? '<span class="badge tone-bad">Manquant</span>' : '<span class="badge tone-accent">En attente</span>';
+  return `
+  ${topbar(`Transfert <span class="mono">${esc(t.numero)}</span>`, `${badgeT(t)} &nbsp; <b>${esc(branch(t.origine)?.nom || t.origine)}</b> → <b>${esc(branch(t.destination)?.nom || t.destination)}</b> · envoyé le ${fdatetime(t.dateEnvoi)}${t.chauffeur ? " · " + esc(t.chauffeur) : ""}${t.vehicule ? " · " + esc(t.vehicule) : ""}`, `
+    <a class="btn" href="#/transferts">← Transferts</a>
+    <button class="btn" data-act="print-transfert" data-id="${t.id}">Imprimer le bordereau</button>
+    ${ouvert && t.lignes.some(l => !l.recu) ? `<button class="btn" data-act="tf-all" data-id="${t.id}">Tout marquer reçu</button>` : ""}
+    ${ouvert ? `<button class="btn btn-primary" data-act="tf-close" data-id="${t.id}">Clôturer la réception</button>` : ""}
+    ${isAdmin() && !recus.length ? `<button class="btn btn-danger" data-act="tf-delete" data-id="${t.id}">Supprimer</button>` : ""}`)}
+  <div class="kpi-row">
+    ${kpi("Colis envoyés", t.lignes.filter(l => !l.horsListe).length)}
+    ${kpi("Reçus", recus.length, "", "good")}
+    ${kpi("En attente", t.lignes.filter(l => !l.recu && !l.manquant).length, ouvert ? `envoyé il y a ${num(daysAgo(t.dateEnvoi))} j` : "", ouvert && daysAgo(t.dateEnvoi) > 2 && t.lignes.some(l => !l.recu) ? "warn" : "")}
+    ${kpi("Manquants", t.lignes.filter(l => l.manquant).length, "", t.lignes.some(l => l.manquant) ? "bad" : "")}
+    ${kpi("Délai d'acheminement", last ? dureeTxt(new Date(last) - new Date(t.dateEnvoi)) : "—", last ? "dernière réception " + fdatetime(last) : "")}
+  </div>
+  ${ouvert ? `<section class="panel scan">
+    <form data-form="tf-recv" data-id="${t.id}" class="row-inline">
+      <input name="code" class="scan-input" placeholder="Réception à ${esc(branch(t.destination)?.nom || t.destination)} : scanner chaque colis reçu" aria-label="Tracking reçu" autocomplete="off">
+      <button class="btn btn-primary">Confirmer reçu</button>
+    </form>
+    ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone}" style="margin:0">${esc(ui.scanMsg.text)}</div>` : ""}
+  </section>` : `<div class="alert ${statutTransfert(t) === "recu" ? "good" : "bad"}">Réception clôturée le ${fdatetime(t.cloture)}${t.lignes.some(l => l.manquant) ? ` — ${t.lignes.filter(l => l.manquant).length} colis manquant(s)` : " — tout est arrivé"}.</div>`}
+  <div class="table-wrap"><table class="tbl"><thead><tr><th>#</th><th>Tracking</th><th>Client / contenu</th><th>État</th><th>Date de réception</th><th>Reçu par</th><th></th></tr></thead><tbody>
+    ${t.lignes.map((l, i) => { const c = colisOf(l.colisId); return `<tr>
+      <td>${i + 1}</td><td class="mono">${c ? `<a href="#/colis/${c.id}">${esc(l.tracking)}</a>` : esc(l.tracking)}</td>
+      <td>${c ? `${esc(clientOf(c.clientId)?.nom || "")} — ${esc(c.description)}` : '<span class="muted">—</span>'}</td>
+      <td>${etat(l)}</td><td class="nowrap">${l.recu ? fdatetime(l.dateReception) : "—"}</td><td>${l.recuPar ? esc(userName(l.recuPar)) : ""}</td>
+      <td class="nowrap">${ouvert ? (l.recu ? `<button class="btn btn-sm" data-act="tf-unmark" data-id="${t.id}" data-i="${i}">Annuler</button>` : `<button class="btn btn-sm btn-primary" data-act="tf-mark" data-id="${t.id}" data-i="${i}">Reçu</button>`)
+        : l.manquant ? `<button class="btn btn-sm" data-act="tf-mark" data-id="${t.id}" data-i="${i}" title="Le colis est finalement arrivé">Arrivé finalement</button>` : ""}</td></tr>`; }).join("")}
+  </tbody></table></div>
+  ${t.note ? `<p class="muted">Note : ${esc(t.note)}</p>` : ""}`;
+}
 
 /* ---------- Clients ---------- */
 VIEWS.clients = id => {
@@ -1118,6 +1264,41 @@ const ACTIONS = {
     if (!confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
     store.mutate(() => { m.etapes = itineraireType(m.mode, m.destination, m.dateDepart); syncDatesManifeste(m); });
   },
+  "tf-remove": el => { ui.transfert.lignes = ui.transfert.lignes.filter(l => l.tracking !== el.dataset.id); ui.scanMsg = null; render(); },
+  "tf-reset": () => { if (!ui.transfert?.lignes.length || confirmBox("Vider ce bordereau ?")) { ui.transfert = null; ui.scanMsg = null; render(); } },
+  "tf-mark": el => {
+    const t = transfertOf(el.dataset.id); const l = t.lignes[+el.dataset.i];
+    store.mutate(() => { recevoirLigne(t, l); if (t.cloture) log("Transfert", `${t.numero} : ${l.tracking} finalement reçu`); });
+  },
+  "tf-unmark": el => {
+    const t = transfertOf(el.dataset.id); const l = t.lignes[+el.dataset.i];
+    store.mutate(() => { if (l.horsListe) t.lignes.splice(+el.dataset.i, 1); else Object.assign(l, { recu: false, dateReception: null, recuPar: null }); });
+  },
+  "tf-all": el => {
+    const t = transfertOf(el.dataset.id); const n = t.lignes.filter(l => !l.recu).length;
+    if (!confirmBox(`Confirmer la réception des ${n} colis restants sans les scanner ?`)) return;
+    store.mutate(() => { t.lignes.filter(l => !l.recu).forEach(l => recevoirLigne(t, l)); log("Transfert", `${t.numero} : ${n} colis marqués reçus`); });
+  },
+  "tf-close": el => {
+    const t = transfertOf(el.dataset.id); const n = t.lignes.filter(l => !l.recu).length;
+    if (!confirmBox(n ? `${n} colis n'ont pas été reçus : ils seront marqués MANQUANTS. Clôturer ?` : "Clôturer la réception de ce transfert ?")) return;
+    store.mutate(() => {
+      t.lignes.forEach(l => { if (!l.recu) l.manquant = true; });
+      t.cloture = store.nowIso();
+      log("Transfert", `${t.numero} clôturé — ${t.lignes.filter(l => l.recu).length} reçus, ${n} manquants`);
+    });
+    ui.scanMsg = null; toast(n ? `${n} colis manquant(s) signalé(s)` : "Transfert complet", n ? "bad" : "good");
+  },
+  "tf-delete": el => {
+    const t = transfertOf(el.dataset.id);
+    if (!confirmBox(`Supprimer le transfert ${t.numero} ?`)) return;
+    store.mutate(d => { d.transferts = d.transferts.filter(x => x.id !== t.id); log("Transfert", `${t.numero} supprimé`); });
+    go("transferts");
+  },
+  "print-transfert": el => printTransfert(transfertOf(el.dataset.id)),
+  "export-transferts": () => downloadCsv("welj-transferts.csv", [["N° transfert", "Date d'envoi", "Bureau d'envoi", "Bureau destinataire", "Chauffeur", "Véhicule", "Tracking", "Client", "Contenu", "État", "Date de réception"],
+    ...(db.transferts || []).flatMap(t => t.lignes.map(l => { const c = colisOf(l.colisId); return [t.numero, t.dateEnvoi, branch(t.origine)?.nom || t.origine, branch(t.destination)?.nom || t.destination, t.chauffeur, t.vehicule,
+      l.tracking, c ? clientOf(c.clientId)?.nom : "", c?.description || "", l.horsListe ? "Reçu hors bordereau" : l.recu ? "Reçu" : l.manquant ? "Manquant" : "En attente", l.dateReception || ""]; }))]),
   "man-mode": el => { ui.manifestes.mode = el.dataset.id; render(); },
   "export-voyages": () => downloadCsv("welj-registre-voyages.csv", [["Date d'envoi", "Parti", "N° voyage", "Mode", "Transporteur", "Vol / navire", "Conteneur", "Référence", "Destination", "Colis", "Pièces", "Poids lb", "Valeur $", "Fret $", "Arrivée Haïti", "Statut"],
     ...[...db.manifestes].sort((a, b) => String(dateEnvoi(a)).localeCompare(String(dateEnvoi(b)))).map(m => { const b = bilanOf(m); return [dayKey(dateEnvoi(m)), m.bilan ? "oui" : "non", m.numero, m.mode === "mer" ? "Bateau" : "Avion", m.transporteur, m.mode === "mer" ? m.navire : m.vol, m.conteneur, m.reference,
@@ -1245,6 +1426,29 @@ ACTIONS["delete-user"] = el => {
   closeModal();
 };
 
+function ajouterTrackings(codes) {
+  const d = ui.transfert; if (!d || !codes.length) return;
+  let ajoutes = 0; const doublons = [];
+  for (const code of codes) {
+    if (d.lignes.some(l => l.tracking === code)) { doublons.push(code); continue; }
+    const c = findColis(code);
+    d.lignes.unshift({ tracking: c ? c.tracking : code, colisId: c?.id || null }); ajoutes++;
+  }
+  ui.scanMsg = doublons.length ? { tone: "warn", text: `Déjà sur le bordereau : ${doublons.join(", ")}` }
+    : { tone: "good", text: ajoutes === 1 ? `✓ ${d.lignes[0].tracking} ajouté${d.lignes[0].colisId ? "" : " (non enregistré dans le système)"}` : `✓ ${ajoutes} numéros ajoutés` };
+  render();
+}
+/** Confirme la réception d'une ligne de bordereau (date, agent) et l'inscrit dans l'historique du colis. */
+function recevoirLigne(t, l) {
+  Object.assign(l, { recu: true, dateReception: store.nowIso(), recuPar: me().id, manquant: false });
+  const c = colisOf(l.colisId);
+  if (c) {
+    // Le colis devient disponible au comptoir du bureau qui l'a reçu
+    if (["arrive", "pret"].includes(c.statut)) c.destination = t.destination;
+    addEvent(c, c.statut, `Reçu au bureau ${branch(t.destination)?.nom || t.destination} — transfert ${t.numero}`, branch(t.destination)?.nom);
+  }
+}
+
 /* =========================================================
    FORMULAIRES (soumissions)
 ========================================================= */
@@ -1349,6 +1553,48 @@ const FORMS = {
       db_.manifestes.push(m); log("Nouveau manifeste", m.numero);
     });
     closeModal(); go("manifestes", m.id);
+  },
+  "tf-scan": form => { ajouterTrackings(splitTrackings(form.code.value)); },
+  "tf-bulk": form => { ajouterTrackings(splitTrackings(form.bulk.value)); },
+  "tf-save": form => {
+    const d = { ...ui.transfert, ...formData(form) };
+    if (!d.destination) { toast("Choisissez le bureau destinataire", "bad"); return; }
+    if (d.destination === d.origine) { toast("Le bureau destinataire doit être différent du bureau d'envoi", "bad"); return; }
+    if (!d.lignes.length) { toast("Ajoutez au moins un tracking", "bad"); return; }
+    let t;
+    store.mutate(db_ => {
+      db_.transferts = db_.transferts || [];
+      const dateEnvoi = new Date(d.dateEnvoi).toISOString();
+      t = { id: store.uid(), numero: numeroTransfert(store.nextSeq("transfert"), new Date(dateEnvoi)), origine: d.origine, destination: d.destination, dateEnvoi,
+        chauffeur: d.chauffeur, vehicule: d.vehicule, note: d.note, user: me().id, createdAt: store.nowIso(), cloture: null,
+        lignes: [...d.lignes].reverse().map(l => ({ tracking: l.tracking, colisId: l.colisId, recu: false, dateReception: null, recuPar: null, horsListe: false, manquant: false })) };
+      db_.transferts.push(t);
+      t.lignes.forEach(l => { const c = colisOf(l.colisId); if (c) addEvent(c, c.statut, `Envoyé vers ${branch(t.destination)?.nom || t.destination} — transfert ${t.numero}`, branch(t.origine)?.nom, dateEnvoi); });
+      log("Transfert", `${t.numero} : ${t.lignes.length} colis ${t.origine} → ${t.destination}`);
+    });
+    ui.transfert = null; ui.scanMsg = null;
+    toast(`Transfert ${t.numero} enregistré (${t.lignes.length} colis)`);
+    go("transferts", t.id);
+  },
+  "tf-recv": form => {
+    const t = transfertOf(form.dataset.id); const codes = splitTrackings(form.code.value);
+    if (!codes.length) return;
+    const msgs = [];
+    store.mutate(() => {
+      for (const code of codes) {
+        const c = findColis(code);
+        const l = t.lignes.find(x => x.tracking === code || (c && x.colisId === c.id));
+        if (l && l.recu) msgs.push({ tone: "warn", text: `${code} déjà confirmé reçu le ${fdatetime(l.dateReception)}.` });
+        else if (l) { recevoirLigne(t, l); msgs.push({ tone: "good", text: `✓ ${code} reçu.` }); }
+        else {
+          const nl = { tracking: code, colisId: c?.id || null, recu: false, dateReception: null, recuPar: null, horsListe: true, manquant: false };
+          t.lignes.push(nl); recevoirLigne(t, nl);
+          msgs.push({ tone: "bad", text: `⚠ ${code} n'est PAS sur ce bordereau : ajouté comme « reçu hors bordereau ».` });
+        }
+      }
+    });
+    ui.scanMsg = msgs.length === 1 ? msgs[0] : { tone: msgs.some(m => m.tone === "bad") ? "bad" : "good", text: msgs.map(m => m.text).join(" ") };
+    render();
   },
   etape: form => {
     const m = manifesteOf(form.dataset.id); const d = formData(form);
@@ -1480,6 +1726,18 @@ function printManifeste(m) {
     </tbody></table>
     <div class="doc-cols sign"><div>Préparé par : ____________________</div><div>Reçu par : ____________________</div></div>`);
 }
+function printTransfert(t) {
+  printHtml(`${docHeader()}
+    <h2>Bordereau de transfert ${esc(t.numero)}</h2>
+    <div class="doc-cols"><div><b>De</b><br>${esc(branch(t.origine)?.nom || t.origine)}</div><div><b>Vers</b><br>${esc(branch(t.destination)?.nom || t.destination)}</div>
+    <div><b>Date d'envoi</b><br>${fdatetime(t.dateEnvoi)}</div><div><b>Chauffeur / véhicule</b><br>${esc(t.chauffeur || "—")} ${esc(t.vehicule || "")}</div></div>
+    <div style="margin-bottom:10px">${barcodeSvg(t.numero, { height: 34, narrow: 1.2 })}</div>
+    <table class="doc-table"><thead><tr><th>#</th><th>Tracking</th><th>Client</th><th>Contenu</th><th>Reçu ✓</th><th>Date de réception</th></tr></thead><tbody>
+    ${t.lignes.map((l, i) => { const c = colisOf(l.colisId); return `<tr><td>${i + 1}</td><td>${esc(l.tracking)}</td><td>${esc(c ? clientOf(c.clientId)?.nom || "" : "")}</td><td>${esc(c?.description || "")}</td>
+      <td>${l.recu ? "✓" : "☐"}</td><td>${l.recu ? fdatetime(l.dateReception) : ""}</td></tr>`; }).join("")}
+    <tr class="total"><td colspan="6">Total : ${t.lignes.length} colis</td></tr></tbody></table>
+    <div class="doc-cols sign"><div>Remis par (${esc(branch(t.origine)?.nom || "")}) : ____________________</div><div>Reçu par (${esc(branch(t.destination)?.nom || "")}) : ____________________<br><br>Date : ____ / ____ / ______</div></div>`);
+}
 function printStatement(cl) {
   const cs = db.colis.filter(c => c.clientId === cl.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   printHtml(`${docHeader()}
@@ -1511,7 +1769,11 @@ document.addEventListener("change", e => {
   if (e.target.dataset.filter && e.target.tagName !== "INPUT") applyFilter(e.target);
   if (e.target.dataset.filter && ["date", "month"].includes(e.target.type)) applyFilter(e.target);
 });
-document.addEventListener("input", e => { if (e.target.dataset.filter && e.target.type === "search") applyFilter(e.target); });
+document.addEventListener("input", e => {
+  if (e.target.dataset.filter && e.target.type === "search") applyFilter(e.target);
+  if (e.target.dataset.draft && ui.transfert) ui.transfert[e.target.dataset.draft] = e.target.value;
+});
+document.addEventListener("change", e => { if (e.target.dataset.draft && ui.transfert) ui.transfert[e.target.dataset.draft] = e.target.value; });
 function applyFilter(el) {
   const [page, key] = el.dataset.filter.split(".");
   ui[page][key] = el.value;
