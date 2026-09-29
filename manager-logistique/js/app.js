@@ -1,5 +1,5 @@
 /* =========================================================
-   WELJ EXPRESS MANAGER — application principale
+   MANAGER LOGISTIQUE — application principale
    Routeur par hash (#/page/id), rendu par chaînes HTML, et un
    seul gestionnaire d'événements délégué (data-act / data-form).
 ========================================================= */
@@ -7,7 +7,7 @@ import * as store from "./store.js";
 import {
   STATUTS, statut, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode,
   CATEGORIES, calculerFacture, poidsVolumetrique, round, money, htg, num, fdate, fdatetime,
-  numeroTracking, numeroManifeste, numeroTransfert, numeroReception, LIVREURS_USA, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER,
+  nomEntreprise, numeroTracking, numeroManifeste, numeroTransfert, numeroReception, LIVREURS_USA, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER,
   TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,
 } from "./logic.js";
 import { syncDatesManifeste, bilanManifeste, enregistrerVoyage } from "./seed.js";
@@ -140,7 +140,7 @@ function render() {
   if (focus) { const el = $(`[data-filter="${focus.key}"]`); if (el) { el.focus(); try { el.setSelectionRange(focus.pos, focus.pos); } catch { /* select */ } } }
   VIEW_MOUNT[page]?.(id);
 }
-window.addEventListener("hashchange", () => { ui.navOpen = false; ui.scanMsg = null; render(); window.scrollTo(0, 0); });
+window.addEventListener("hashchange", () => { ui.navOpen = false; ui.scanMsg = null; closeModal(); render(); window.scrollTo(0, 0); });
 store.onChange(() => render());
 
 function sidebar(active) {
@@ -152,8 +152,8 @@ function sidebar(active) {
   return `
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">W</div>
-      <div><div class="brand-name">Manager Logistique</div><div class="brand-sub">WELJ Express Services</div></div>
+      <div class="brand-mark" aria-hidden="true">M</div>
+      <div><div class="brand-name">Manager Logistique</div><div class="brand-sub">${esc(S().entreprise.nom?.trim() || "Gestion logistique")}</div></div>
       <button class="nav-toggle" data-act="toggle-nav" aria-label="Menu">☰</button>
     </div>
     <nav class="navlinks">
@@ -240,7 +240,7 @@ const statutTransfert = t => t.cloture ? (t.lignes.some(l => l.manquant) ? "inco
   : t.lignes.length && t.lignes.every(l => l.recu) ? "recu" : t.lignes.some(l => l.recu) ? "partiel" : "envoye";
 const badgeT = t => { const s = STATUTS_TRANSFERT[statutTransfert(t)]; return `<span class="badge tone-${s.tone}">${esc(s.label)}</span>`; };
 const transfertOuvert = t => !t.cloture && !t.lignes.every(l => l.recu);
-/** Retrouve un colis du système par n° WELJ ou n° fournisseur. */
+/** Retrouve un colis du système par son n° de colis ou n° fournisseur. */
 const findColis = code => { const c = String(code || "").trim().toUpperCase(); return c ? db.colis.find(x => x.tracking.toUpperCase() === c || String(x.trackingFournisseur || "").toUpperCase() === c) : null; };
 const splitTrackings = txt => String(txt || "").split(/[\s,;]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
 const transportInfo = m => [m.mode === "mer" ? m.navire : m.vol, m.conteneur ? "Cont. " + m.conteneur : ""].filter(Boolean).join(" · ");
@@ -278,7 +278,7 @@ VIEWS.dashboard = () => {
   const actifs = db.manifestes.filter(m => m.statut !== "arrive").sort((a, b) => a.eta.localeCompare(b.eta));
 
   return `
-  ${topbar("Tableau de bord", `${esc(S().entreprise.nom)} — vue d'ensemble de la chaîne Miami → Haïti`,
+  ${topbar("Tableau de bord", `${esc(nomEntreprise(S()))} — vue d'ensemble de la chaîne Miami → Haïti`,
     can("reception") ? `<a class="btn btn-primary" href="#/reception">+ Réceptionner un colis</a>` : "")}
   <div class="kpi-row">
     ${kpi("À l'entrepôt Miami", entrepot.length, `${num(entrepot.reduce((s, c) => s + +c.poids, 0))} lb à expédier`)}
@@ -403,7 +403,7 @@ VIEWS.acheminement = () => {
       <h3>Où sont les envois en ce moment ?</h3>
       <p class="muted small">Dernier point de transit validé pour chaque envoi en cours.</p>
       <table class="tbl"><thead><tr><th>Point de transit</th><th>Pays</th><th class="r">Envois</th><th class="r">Colis</th><th class="r">Poids</th></tr></thead><tbody>
-        ${entrepotSeul.length ? `<tr><td>Entrepôt WELJ — colis non consolidés</td><td>USA</td><td class="r">—</td><td class="num r">${entrepotSeul.length}</td><td class="num r">${num(entrepotSeul.reduce((s, c) => s + +c.poids, 0))} lb</td></tr>` : ""}
+        ${entrepotSeul.length ? `<tr><td>Entrepôt — colis non consolidés</td><td>USA</td><td class="r">—</td><td class="num r">${entrepotSeul.length}</td><td class="num r">${num(entrepotSeul.reduce((s, c) => s + +c.poids, 0))} lb</td></tr>` : ""}
         ${[...presence.entries()].map(([pid, g]) => { const p = pointOf(pid); return `<tr><td><b>${esc(p.nom)}</b> <span class="mono muted">${esc(p.code || "")}</span><div class="small">${g.envois.map(m => `<a class="mono" href="#/manifestes/${m.id}">${modeIc(m.mode)} ${esc(m.numero)}</a>`).join(" · ")}</div></td>
           <td>${esc(p.pays || "")}</td><td class="num r">${g.envois.length}</td><td class="num r">${g.colis}</td><td class="num r">${num(g.lb)} lb</td></tr>`; }).join("")}
       </tbody></table>
@@ -546,7 +546,7 @@ function colisFields(c = {}) {
   return `
   <div class="field"><label>Client *</label>
     <div class="row-inline">
-      <input name="clientRef" list="clients-list" required placeholder="Code ou nom du client (ex. WELJ-0001)" value="${esc(c.clientId ? clientLabel(clientOf(c.clientId)) : "")}">
+      <input name="clientRef" list="clients-list" required placeholder="Code ou nom du client (ex. CL-0001)" value="${esc(c.clientId ? clientLabel(clientOf(c.clientId)) : "")}">
       <button type="button" class="btn" data-act="new-client-inline" title="Créer un client">+ Client</button>
     </div>
     <datalist id="clients-list">${db.clients.map(x => `<option value="${esc(clientLabel(x))}">`).join("")}</datalist>
@@ -618,7 +618,7 @@ VIEWS.colis = id => {
   ${topbar("Colis", `${list.length} colis affiché(s) sur ${db.colis.length}`,
     `<button class="btn" data-act="export-colis">Exporter CSV</button>${can("reception") ? `<a class="btn btn-primary" href="#/reception">+ Réceptionner</a>` : ""}`)}
   <div class="filters">
-    <input class="search" type="search" placeholder="Rechercher : n° WELJ, n° fournisseur, client, contenu…" data-filter="colis.q" value="${esc(f.q)}">
+    <input class="search" type="search" placeholder="Rechercher : n° de colis, n° fournisseur, client, contenu…" data-filter="colis.q" value="${esc(f.q)}">
     <select data-filter="colis.statut">${opt("", "Tous les statuts")}${STATUTS.map(s => opt(s.id, s.label, s.id === f.statut)).join("")}</select>
     <select data-filter="colis.dest">${opt("", "Toutes destinations")}${destOptions(f.dest, { all: true })}</select>
   </div>
@@ -627,7 +627,7 @@ VIEWS.colis = id => {
 function colisTable(list, { select = false, removable = false } = {}) {
   if (!list.length) return empty("Aucun colis.");
   return `<div class="table-wrap"><table class="tbl">
-    <thead><tr>${select ? `<th><input type="checkbox" data-act-change="select-all" aria-label="Tout sélectionner"></th>` : ""}<th>N° WELJ</th><th>Client</th><th>Contenu</th><th class="r">Poids</th><th>Service</th><th>Dest.</th><th>Statut</th><th class="r">Solde</th><th>Reçu le</th>${removable ? "<th></th>" : ""}</tr></thead>
+    <thead><tr>${select ? `<th><input type="checkbox" data-act-change="select-all" aria-label="Tout sélectionner"></th>` : ""}<th>N° colis</th><th>Client</th><th>Contenu</th><th class="r">Poids</th><th>Service</th><th>Dest.</th><th>Statut</th><th class="r">Solde</th><th>Reçu le</th>${removable ? "<th></th>" : ""}</tr></thead>
     <tbody>${list.map(c => { const sol = soldeColis(c); return `<tr class="${select ? "" : "click"}" ${select ? "" : `data-href="colis/${c.id}"`}>
       ${select ? `<td><input type="checkbox" name="sel" value="${c.id}" aria-label="Sélectionner ${esc(c.tracking)}"></td>` : ""}
       <td class="mono">${esc(c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "—")}</td><td>${esc(c.description)}</td>
@@ -827,7 +827,7 @@ VIEWS.comptoir = () => {
   ${topbar("Retrait & livraison", "Remise des colis aux clients en succursale ou à domicile")}
   <div class="scan panel">
     <form data-form="scan" class="row-inline">
-      <input name="code" placeholder="Scanner ou saisir un n° WELJ (douchette code-barres)" aria-label="Numéro de colis" autofocus>
+      <input name="code" placeholder="Scanner ou saisir un n° de colis (douchette code-barres)" aria-label="Numéro de colis" autofocus>
       <button class="btn btn-primary">Ouvrir</button>
     </form>
     ${u.role !== "livreur" ? `<select data-filter="comptoir.branche" aria-label="Succursale">${destOptions(br, { all: true })}</select>` : ""}
@@ -1016,8 +1016,9 @@ function clientDetail(id) {
     <section class="panel">
       <h3>Adresse de réception à Miami</h3>
       <p class="muted small">À communiquer au client pour ses achats en ligne (Amazon, Shein, eBay…).</p>
-      <div class="address-box" id="us-address">${esc(c.nom)}<br><b>${esc(c.code)}</b><br>${esc(E.adresseUS).replace(", Fort", "<br>Fort")}<br>Tél. ${esc(E.telephoneUS)}</div>
-      <button class="btn btn-sm" data-act="copy-address" data-id="${c.id}">Copier l'adresse</button>
+      ${E.adresseUS ? `<div class="address-box" id="us-address">${esc(c.nom)}<br><b>${esc(c.code)}</b><br>${esc(E.adresseUS)}${E.telephoneUS ? `<br>Tél. ${esc(E.telephoneUS)}` : ""}</div>`
+        : `<div class="alert warn">Adresse de l'entrepôt aux USA non renseignée : ajoutez-la dans Paramètres → Entreprise.</div>`}
+      ${E.adresseUS ? `<button class="btn btn-sm" data-act="copy-address" data-id="${c.id}">Copier l'adresse</button>` : ""}
       <h3 class="mt">Informations</h3>
       <dl class="dl">
         <dt>Type</dt><dd>${c.type === "entreprise" ? "Entreprise" : "Particulier"}</dd>
@@ -1093,7 +1094,7 @@ VIEWS.suivi = () => {
   const idx = c ? STATUTS.findIndex(s => s.id === c.statut) : -1;
   const steps = ["recu", "transit", "arrive", "livre"];
   return `
-  ${topbar("Suivi de colis", "Ce que voit le client : saisissez un n° WELJ ou le n° de suivi du fournisseur")}
+  ${topbar("Suivi de colis", "Ce que voit le client : saisissez le n° de colis ou le n° de suivi du fournisseur")}
   <form class="panel track-form" data-form="suivi"><input name="q" value="${esc(ui.suivi.q)}" placeholder="Ex. ${esc(db.colis[0]?.tracking || "WX2609000001")}" aria-label="Numéro de suivi"><button class="btn btn-primary">Suivre</button></form>
   ${q && !c ? empty("Aucun colis ne correspond à ce numéro.") : ""}
   ${c ? `<section class="panel track">
@@ -1225,7 +1226,7 @@ const ACTIONS = {
   "receive-for": el => { ui.reception.clientId = el.dataset.id; go("reception"); },
   "copy-address": el => {
     const c = clientOf(el.dataset.id); const E = S().entreprise;
-    navigator.clipboard?.writeText(`${c.nom}\n${c.code}\n${E.adresseUS}\nTél. ${E.telephoneUS}`).then(() => toast("Adresse copiée"), () => toast("Copie impossible", "bad"));
+    navigator.clipboard?.writeText(`${[c.nom, c.code, E.adresseUS, E.telephoneUS ? "Tél. " + E.telephoneUS : ""].filter(Boolean).join("\n")}`).then(() => toast("Adresse copiée"), () => toast("Copie impossible", "bad"));
   },
 
   "change-status": el => {
@@ -1408,11 +1409,11 @@ const ACTIONS = {
     go("transferts");
   },
   "print-transfert": el => printTransfert(transfertOf(el.dataset.id)),
-  "export-transferts": () => downloadCsv("welj-transferts.csv", [["N° transfert", "Date d'envoi", "Bureau d'envoi", "Bureau destinataire", "Chauffeur", "Véhicule", "Tracking", "Client", "Contenu", "État", "Date de réception"],
+  "export-transferts": () => downloadCsv("transferts.csv", [["N° transfert", "Date d'envoi", "Bureau d'envoi", "Bureau destinataire", "Chauffeur", "Véhicule", "Tracking", "Client", "Contenu", "État", "Date de réception"],
     ...(db.transferts || []).flatMap(t => t.lignes.map(l => { const c = colisOf(l.colisId); return [t.numero, t.dateEnvoi, branch(t.origine)?.nom || t.origine, branch(t.destination)?.nom || t.destination, t.chauffeur, t.vehicule,
       l.tracking, c ? clientOf(c.clientId)?.nom : "", c?.description || "", l.horsListe ? "Reçu hors bordereau" : l.recu ? "Reçu" : l.manquant ? "Manquant" : "En attente", l.dateReception || ""]; }))]),
   "man-mode": el => { ui.manifestes.mode = el.dataset.id; render(); },
-  "export-voyages": () => downloadCsv("welj-registre-voyages.csv", [["Date d'envoi", "Parti", "N° voyage", "Mode", "Transporteur", "Vol / navire", "Conteneur", "Référence", "Destination", "Colis", "Pièces", "Poids lb", "Valeur $", "Fret $", "Arrivée Haïti", "Statut"],
+  "export-voyages": () => downloadCsv("registre-voyages.csv", [["Date d'envoi", "Parti", "N° voyage", "Mode", "Transporteur", "Vol / navire", "Conteneur", "Référence", "Destination", "Colis", "Pièces", "Poids lb", "Valeur $", "Fret $", "Arrivée Haïti", "Statut"],
     ...[...db.manifestes].sort((a, b) => String(dateEnvoi(a)).localeCompare(String(dateEnvoi(b)))).map(m => { const b = bilanOf(m); return [dayKey(dateEnvoi(m)), m.bilan ? "oui" : "non", m.numero, m.mode === "mer" ? "Bateau" : "Avion", m.transporteur, m.mode === "mer" ? m.navire : m.vol, m.conteneur, m.reference,
       branch(m.destination)?.nom || m.destination, b.colis, b.pieces, b.poids, b.valeur, b.fret, dayKey(m.eta), statutManifeste(m.statut).label]; })]),
   "print-voyages": () => {
@@ -1443,11 +1444,11 @@ const ACTIONS = {
     ui.caisse.du = el.dataset.id === "today" ? dayKey(t) : el.dataset.id === "7" ? dayKey(Date.now() - 6 * 86400000) : monthKey(t) + "-01";
     render();
   },
-  "export-colis": () => exportColis(db.colis, "welj-colis.csv"),
-  "export-colis-mois": () => exportColis(db.colis.filter(c => monthKey(c.createdAt) === ui.rapports.mois), `welj-colis-${ui.rapports.mois}.csv`),
-  "export-clients": () => downloadCsv("welj-clients.csv", [["Code", "Nom", "Type", "Téléphone", "Email", "Succursale", "Adresse", "Solde USD"],
+  "export-colis": () => exportColis(db.colis, "colis.csv"),
+  "export-colis-mois": () => exportColis(db.colis.filter(c => monthKey(c.createdAt) === ui.rapports.mois), `colis-${ui.rapports.mois}.csv`),
+  "export-clients": () => downloadCsv("clients.csv", [["Code", "Nom", "Type", "Téléphone", "Email", "Succursale", "Adresse", "Solde USD"],
     ...db.clients.map(c => [c.code, c.nom, c.type, c.telephone, c.email, c.succursale, c.adresse, soldeClient(c.id)])]),
-  "export-paiements": () => downloadCsv("welj-paiements.csv", [["Reçu", "Date", "Client", "Colis", "Méthode", "Montant USD", "Montant HTG", "Référence"],
+  "export-paiements": () => downloadCsv("paiements.csv", [["Reçu", "Date", "Client", "Colis", "Méthode", "Montant USD", "Montant HTG", "Référence"],
     ...db.paiements.map(p => [p.numero, p.date, clientOf(p.clientId)?.nom, colisOf(p.colisId)?.tracking, methode(p.methode), p.montant, p.montantHTG || "", p.reference])]),
 
   "add-branch": () => openModal(`<form data-form="branch-new"><h2>Nouvelle succursale</h2>
@@ -1460,7 +1461,7 @@ const ACTIONS = {
     <div class="modal-actions"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Ajouter</button></div></form>`),
   "new-user": () => openModal(userForm({ role: "comptoir", succursale: "PAP" })),
   "edit-user": el => openModal(userForm(db.users.find(u => u.id === el.dataset.id))),
-  backup: () => download(`welj-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`, store.exportJson()),
+  backup: () => download(`manager-logistique-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`, store.exportJson()),
   "reset-demo": async () => { if (await confirmBox("Remplacer toutes les données par les données de démonstration ?")) { store.resetDemo(); toast("Données de démo rechargées"); } },
   wipe: async () => { if (await confirmBox("Effacer TOUS les clients, colis, manifestes et paiements ? (les paramètres sont réinitialisés)")) { store.wipeAll(); toast("Base vidée"); } },
 };
@@ -1502,7 +1503,7 @@ function pointsOptions(selected) {
   const pts = S().pointsTransit;
   return grp("États-Unis", pts.filter(p => p.pays === "USA")) + grp("Haïti", pts.filter(p => p.pays === "Haïti"))
     + grp("République dominicaine & autres escales", pts.filter(p => p.pays !== "USA" && p.pays !== "Haïti"))
-    + grp("Succursales WELJ", S().succursales.map(b => pointOf(b.id)));
+    + grp("Nos succursales", S().succursales.map(b => pointOf(b.id)));
 }
 function etapeForm(m, e) {
   const neu = !e.id;
@@ -1554,9 +1555,9 @@ function ajouterSuivis(codes) {
 }
 /** Client technique qui accueille les colis reçus sans destinataire identifié. */
 function clientNonIdentifie(db_) {
-  let c = db_.clients.find(x => x.code === "WELJ-0000");
+  let c = db_.clients.find(x => x.code === "CL-0000");
   if (!c) {
-    c = { id: "c-inconnu", code: "WELJ-0000", nom: "Colis non identifié", type: "particulier", telephone: "", email: "", succursale: "PAP", adresse: "",
+    c = { id: "c-inconnu", code: "CL-0000", nom: "Colis non identifié", type: "particulier", telephone: "", email: "", succursale: "PAP", adresse: "",
       notes: "Colis reçus sans client : ouvrir le colis puis « Modifier » pour l'attribuer au bon client.", createdAt: store.nowIso() };
     db_.clients.push(c);
   }
@@ -1863,14 +1864,14 @@ const FORMS = {
 ========================================================= */
 function docHeader() {
   const E = S().entreprise;
-  return `<div class="doc-head"><div><div class="doc-brand">${esc(E.nom)}</div><div class="small">${esc(E.adresse)}<br>${esc(E.telephone)} · ${esc(E.email)} · ${esc(E.site)}</div></div></div>`;
+  return `<div class="doc-head"><div><div class="doc-brand">${esc(nomEntreprise(S()))}</div><div class="small">${esc(E.adresse || "")}${E.adresse ? "<br>" : ""}${[E.telephone, E.email, E.site].filter(Boolean).map(esc).join(" · ")}</div></div></div>`;
 }
 function printLabel(c) { printLabels([c]); }
 function printLabels(list) { printHtml(`<style>@page{size:4in 6in;margin:0.15in}.label{break-after:page}</style>${list.map(labelHtml).join("")}`, { format: "label" }); }
 function labelHtml(c) {
   const cl = clientOf(c.clientId); const b = branch(c.destination);
   return `<div class="label">
-    <div class="label-top"><b>${esc(S().entreprise.nom)}</b><span>${esc(serviceOf(c.service)?.nom || "")}</span></div>
+    <div class="label-top"><b>${esc(nomEntreprise(S()))}</b><span>${esc(serviceOf(c.service)?.nom || "")}</span></div>
     <div class="label-dest">${esc(c.destination)}</div>
     <div class="small">${esc(b?.nom || "")}</div>
     <div class="label-client">${esc(cl?.nom || "")}<br><span class="mono">${esc(cl?.code || "")}</span> · ${esc(cl?.telephone || "")}</div>
@@ -1904,7 +1905,7 @@ function printManifeste(m) {
     <table class="doc-table"><thead><tr><th>Étape</th><th>Point de transit</th><th>Prévu</th><th>Réalisé</th></tr></thead><tbody>
     ${(m.etapes || []).map(e => `<tr><td>${esc(actionEtape(e.action).label)}</td><td>${esc(pointOf(e.pointId).nom)} ${esc(pointOf(e.pointId).code || "")}</td><td>${fdatetime(e.prevu)}</td><td>${e.reel ? fdatetime(e.reel) : ""}</td></tr>`).join("")}
     </tbody></table><br>
-    <table class="doc-table"><thead><tr><th>#</th><th>N° WELJ</th><th>Destinataire</th><th>Contenu</th><th class="r">Pcs</th><th class="r">Poids (lb)</th><th class="r">Valeur ($)</th></tr></thead><tbody>
+    <table class="doc-table"><thead><tr><th>#</th><th>N° colis</th><th>Destinataire</th><th>Contenu</th><th class="r">Pcs</th><th class="r">Poids (lb)</th><th class="r">Valeur ($)</th></tr></thead><tbody>
     ${cs.map((c, i) => `<tr><td>${i + 1}</td><td>${esc(c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "")}</td><td>${esc(c.description)}</td><td class="r">${c.pieces}</td><td class="r">${num(c.poids)}</td><td class="r">${num(c.valeur, 0)}</td></tr>`).join("")}
     <tr class="total"><td colspan="4">Total : ${cs.length} colis</td><td class="r">${cs.reduce((s, c) => s + +c.pieces, 0)}</td><td class="r">${num(cs.reduce((s, c) => s + +c.poids, 0))}</td><td class="r">${num(cs.reduce((s, c) => s + +c.valeur, 0), 0)}</td></tr>
     </tbody></table>
@@ -1933,7 +1934,7 @@ function printStatement(cl) {
     </tbody></table>`);
 }
 function exportColis(list, filename) {
-  downloadCsv(filename, [["N° WELJ", "N° fournisseur", "Date réception", "Client", "Code client", "Contenu", "Catégorie", "Pièces", "Poids lb", "Valeur $", "Service", "Destination", "Statut", "Manifeste", "Facturé $", "Payé $", "Solde $"],
+  downloadCsv(filename, [["N° colis", "N° fournisseur", "Date réception", "Client", "Code client", "Contenu", "Catégorie", "Pièces", "Poids lb", "Valeur $", "Service", "Destination", "Statut", "Manifeste", "Facturé $", "Payé $", "Solde $"],
     ...list.map(c => [c.tracking, c.trackingFournisseur, c.createdAt.slice(0, 10), clientOf(c.clientId)?.nom, clientOf(c.clientId)?.code, c.description, c.categorie, c.pieces, c.poids, c.valeur,
       serviceOf(c.service)?.nom, c.destination, statut(c.statut).label, manifesteOf(c.manifesteId)?.numero || "", c.facture.total, payeColis(c), soldeColis(c)])]);
 }

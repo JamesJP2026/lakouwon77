@@ -104,14 +104,14 @@ export const fdatetime = iso => iso ? new Date(iso).toLocaleString("fr-FR", { da
 /* ---------- Numérotation ---------- */
 const pad = (n, l) => String(n).padStart(l, "0");
 export function numeroTracking(seq, date = new Date()) {
-  return `WX${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}${pad(seq, 5)}`;
+  return `ML${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}${pad(seq, 5)}`;
 }
 export const numeroManifeste = (seq, mode, date = new Date()) =>
   `${mode === "mer" ? "MS" : "MA"}-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
 export const numeroTransfert = (seq, date = new Date()) => `TR-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
 export const numeroReception = (seq, date = new Date()) => `RC-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
 export const LIVREURS_USA = ["Amazon", "UPS", "FedEx", "USPS", "DHL", "OnTrac", "Client (dépôt)", "Autre"];
-export const codeClient = seq => `WELJ-${pad(seq, 4)}`;
+export const codeClient = seq => `CL-${pad(seq, 4)}`;
 export const numeroRecu = seq => `R-${pad(seq, 6)}`;
 
 /* ---------- Code-barres Code 39 (SVG) ----------
@@ -146,17 +146,19 @@ export function barcodeSvg(text, { height = 56, narrow = 2 } = {}) {
 export function messageStatut(c, client, settings) {
   const s = statut(c.statut);
   const suc = settings.succursales.find(b => b.id === c.destination);
-  const base = `${settings.entreprise.nom}: Bonjour ${client?.nom || ""}, votre colis ${c.tracking}`;
+  const base = `${nomEntreprise(settings)}: Bonjour ${client?.nom || ""}, votre colis ${c.tracking}`;
   switch (c.statut) {
     case "recu": return `${base} (${c.description}) a été reçu à notre entrepôt de Miami. Poids: ${c.poids} lb.`;
     case "transit": return `${base} est en route vers Haïti.`;
     case "arrive":
     case "pret": return `${base} est arrivé et prêt pour retrait à ${suc?.nom || "notre succursale"}. Montant: ${money(c._solde ?? 0)}. Horaires: ${settings.entreprise.horaires}.`;
     case "livraison": return `${base} est en cours de livraison. Notre livreur vous contactera.`;
-    case "livre": return `${base} a été livré. Mèsi paske w chwazi WELJ Express!`;
+    case "livre": return `${base} a été livré. Mèsi paske w chwazi nou!`;
     default: return `${base} — statut: ${s.label}.`;
   }
 }
+/** Nom affiché de l'entreprise (à renseigner dans Paramètres). */
+export const nomEntreprise = settings => settings.entreprise?.nom?.trim() || "Manager Logistique";
 export const waLink = (tel, msg) => `https://wa.me/${String(tel || "").replace(/\D/g, "")}?text=${encodeURIComponent(msg)}`;
 
 /* ---------- Acheminement : points de transit et itinéraires ----------
@@ -186,7 +188,7 @@ export const ACTIONS_ETAPE = [
 export const actionEtape = id => ACTIONS_ETAPE.find(a => a.id === id) || { id, label: id, short: id, statut: null };
 
 export const DEFAULT_POINTS = [
-  { id: "WH-FLL",   nom: "Entrepôt WELJ Fort Lauderdale", code: "WELJ-FLL", ville: "Fort Lauderdale, FL", pays: "USA", type: "entrepot" },
+  { id: "WH-FLL",   nom: "Entrepôt Fort Lauderdale", code: "ENT-FLL", ville: "Fort Lauderdale, FL", pays: "USA", type: "entrepot" },
   { id: "MIA",      nom: "Aéroport international de Miami", code: "MIA", ville: "Miami, FL", pays: "USA", type: "aeroport" },
   { id: "FLL-APT",  nom: "Aéroport Fort Lauderdale-Hollywood", code: "FLL", ville: "Fort Lauderdale, FL", pays: "USA", type: "aeroport" },
   { id: "PEV",      nom: "Port Everglades", code: "USPEF", ville: "Fort Lauderdale, FL", pays: "USA", type: "port" },

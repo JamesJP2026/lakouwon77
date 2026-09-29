@@ -7,7 +7,8 @@
 ========================================================= */
 import { seedData, migrate } from "./seed.js";
 
-const KEY = "welj-express-db-v1";
+const KEY = "manager-logistique-db";
+const ANCIENNE_CLE = "welj-express-db-v1"; // données enregistrées par les versions précédentes
 let db = null;
 const listeners = new Set();
 
@@ -16,11 +17,11 @@ export const nowIso = () => new Date().toISOString();
 
 export function load() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY) ?? localStorage.getItem(ANCIENNE_CLE);
     db = raw ? JSON.parse(raw) : null;
   } catch { db = null; }
   if (!db || !db.version) { db = seedData(); save(); }
-  else if (db.version < 9) { migrate(db); save(); }
+  else if (db.version < 10) { migrate(db); save(); }
   return db;
 }
 

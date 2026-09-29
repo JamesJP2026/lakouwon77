@@ -10,8 +10,8 @@ vraie base de données partagée (Supabase : Postgres + Auth + Realtime),
 en gardant la même interface, la même logique métier et **du
 JavaScript vanilla** (aucun framework, aucune étape de build).
 
-> **Nouveau :** le dossier [`welj/`](welj/README.md) contient **Manager Logistique**, une application de gestion logistique Miami → Haïti pour
-> WELJ Express Services (réception entrepôt, manifestes, suivi, caisse).
+> **Nouveau :** le dossier [`manager-logistique/`](manager-logistique/README.md) contient **Manager Logistique**, une application de gestion
+> logistique USA → Haïti (réception entrepôt, voyages, acheminement, transferts entre bureaux, caisse).
 
 ## 1. Architecture
 

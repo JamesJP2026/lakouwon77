@@ -5,7 +5,7 @@ Les navigateurs refusent de charger des modules JavaScript séparés depuis
 un fichier ouvert en double-clic (file://). Ce script regroupe le CSS et
 tous les modules de js/ dans un seul fichier HTML autonome :
 
-    python3 build.py            →  dist/Manager-Logistique-WELJ.html
+    python3 build.py            →  dist/Manager-Logistique.html
 
 Aucune dépendance : Python 3 standard suffit.
 """
@@ -42,7 +42,7 @@ def main() -> None:
     html = html.replace('<script type="module" src="js/app.js"></script>', f'<script>\n"use strict";\n{js}</script>')
     if 'src="js/app.js"' in html or 'href="css/app.css"' in html:
         raise SystemExit("index.html a changé : mettre à jour build.py")
-    out = ROOT / "dist" / "Manager-Logistique-WELJ.html"
+    out = ROOT / "dist" / "Manager-Logistique.html"
     out.parent.mkdir(exist_ok=True)
     out.write_text(html, encoding="utf-8")
     print(f"{out.relative_to(ROOT)} ({out.stat().st_size // 1024} Ko)")

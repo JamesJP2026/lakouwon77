@@ -1,6 +1,6 @@
 /* =========================================================
    DONNÉES INITIALES
-   Informations publiques de WELJ Express Services (adresse,
+   Coordonnées de l'entreprise vides par défaut (à renseigner dans Paramètres) ; (adresse,
    téléphone, horaires, succursales). Les TARIFS sont des
    valeurs d'exemple : à remplacer dans Paramètres par la
    grille officielle de la compagnie.
@@ -18,15 +18,8 @@ const NOUVELLES_SUCCURSALES = [
 export function defaultSettings() {
   return {
     entreprise: {
-      nom: "WELJ Express Services",
-      slogan: "Express shipping to Haiti",
-      telephone: "+509 38 34 7343",
-      telephoneUS: "+1 786 350 7565",
-      email: "info@welj-ht.com",
-      site: "welj-ht.com",
-      adresse: "#7, Route de Jacquet, Delmas 95, Port-au-Prince, Haïti",
-      adresseUS: "6600 NW 12th Ave Ste 215, Fort Lauderdale, FL 33309",
-      horaires: "Lun–Ven 8h–16h, Sam 8h–13h",
+      nom: "", slogan: "", telephone: "", telephoneUS: "", email: "", site: "",
+      adresse: "", adresseUS: "", horaires: "Lun–Ven 8h–16h, Sam 8h–13h",
     },
     tauxChange: 132,
     // Transporteurs par défaut proposés à la création d'un envoi
@@ -60,7 +53,7 @@ const USERS = [
 export function seedData({ empty = false } = {}) {
   const settings = defaultSettings();
   const db = {
-    version: 9, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
+    version: 10, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
     seq: { client: 0, colis: 0, manifeste: 0, recu: 0, transfert: 0, reception: 0 },
     clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [], transferts: [], receptions: [],
   };
@@ -284,6 +277,18 @@ export function migrate(db) {
     db.receptions = db.receptions || [];
     db.seq.reception = db.seq.reception || 0;
     db.version = 9;
+  }
+  if (db.version < 10) {
+    // Application rendue générique : plus aucune mention de WELJ
+    const E = db.settings.entreprise || {};
+    if (Object.values(E).some(v => /welj/i.test(String(v)))) {
+      db.settings.entreprise = { ...defaultSettings().entreprise, horaires: E.horaires || defaultSettings().entreprise.horaires };
+    }
+    const sans = v => typeof v === "string" ? v.replace(/Entrepôt WELJ /g, "Entrepôt ").replace(/\bWELJ-(\d)/g, "CL-$1").replace(/WELJ-FLL/g, "ENT-FLL") : v;
+    db.clients.forEach(c => { c.code = sans(c.code); c.notes = sans(c.notes); });
+    (db.settings.pointsTransit || []).forEach(p => { p.nom = sans(p.nom); p.code = sans(p.code); });
+    db.colis.forEach(c => c.events.forEach(e => { e.lieu = sans(e.lieu); e.note = sans(e.note); }));
+    db.version = 10;
   }
   return db;
 }
