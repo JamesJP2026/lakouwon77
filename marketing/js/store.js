@@ -8,6 +8,8 @@ export const defaultData = () => ({
     delaiPaiement: 15,
     conditions: 'Paiement à réception de facture. Merci de mentionner le numéro de facture lors du règlement.',
     mentions: '',
+    // Clé API Anthropic pour la recherche par IA (reste dans ce navigateur, jamais exportée).
+    cleApi: '',
     // Prestations courantes, ajoutées en un clic dans les honoraires d'un plan.
     catalogue: [
       { description: 'Élaboration de la stratégie et du plan marketing', pu: 0 },

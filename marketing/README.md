@@ -69,9 +69,29 @@ automatiquement ; dans un plan existant, le bouton « Importer la fiche »
 ajoute les nouvelles informations sans rien effacer ni dupliquer. La
 présentation affiche la présence en ligne actuelle du client.
 
-L'application fonctionnant sans serveur, elle ne lit pas elle-même les
-réseaux sociaux (ils bloquent ce type d'accès) : les chiffres sont
-recopiés depuis les pages ouvertes par les boutons de recherche.
+### Recherche automatique par IA (facultatif)
+
+Le bouton **« Rechercher avec l'IA »** de la fiche fait chercher l'entreprise
+sur le web par Claude (API Anthropic, modèle `claude-opus-5-5`, outils de
+recherche et de lecture web côté serveur) : site, réseaux sociaux, fiche
+Google, application mobile, avis, presse. Le résultat remplit les champs
+vides de la fiche (ou tous, si « Remplacer » est coché), et le résumé et les
+sources sont notés dans la fiche. Les chiffres non visibles dans une source
+restent vides : l'IA a pour consigne de ne jamais les estimer.
+
+Mise en place : créer une clé sur console.anthropic.com (paiement à
+l'usage, limite de dépense conseillée) et la coller dans Paramètres →
+Recherche par IA. La clé reste dans le navigateur (appel direct à
+api.anthropic.com) et n'est jamais incluse dans les sauvegardes exportées.
+Le coût estimé est affiché après chaque recherche.
+
+Le SDK officiel `@anthropic-ai/sdk` (licence MIT) est embarqué dans
+`js/vendor/anthropic-sdk.esm.js` (assemblé avec esbuild) et chargé
+seulement au moment d'une recherche.
+
+Sans clé API, les boutons 🔎 ouvrent les recherches manuelles et les
+chiffres sont recopiés à la main (les réseaux sociaux bloquent la lecture
+directe par une page web).
 
 ## Obtenir plus de résultats
 
@@ -111,6 +131,8 @@ js/app.js         vues, éditeur, présentation, factures, routeur
 js/store.js       stockage local, formatage, calcul des totaux
 js/analyse.js     score du plan, résultats, recommandations
 js/fiche.js       fiche entreprise, présence en ligne, diagnostic
+js/ia.js          recherche par IA (API Claude + recherche web)
+js/vendor/        SDK Anthropic assemblé pour le navigateur
 js/secteurs.js    suggestions par secteur d'activité et liste des canaux
 ```
 

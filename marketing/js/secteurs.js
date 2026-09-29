@@ -24,7 +24,7 @@ export const CANAUX = [
   'Facebook / Instagram', 'TikTok', 'WhatsApp Business', 'Google Ads', 'Site web / SEO',
   'Email marketing', 'SMS', 'Radio', 'Télévision', 'Presse écrite', 'Affichage / panneaux',
   'Flyers / prospectus', 'Événementiel', 'Influenceurs', 'Partenariats', 'Relations publiques',
-  'Parrainage / fidélité', 'Promotion en point de vente', 'LinkedIn', 'YouTube',
+  'Parrainage / fidélité', 'Promotion en point de vente', 'LinkedIn', 'YouTube', 'Application mobile',
 ];
 
 const COMMUN = {

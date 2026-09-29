@@ -4,6 +4,7 @@ import {
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche } from './fiche.js';
+import { rechercherEntreprise, fusionnerResultat } from './ia.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
 let data = load();
@@ -277,6 +278,10 @@ function viewFiche(c) {
 
       <div class="panel"><h3>1. Vérifier ce qui existe sur internet</h3>
         <p class="muted">Ouvrez ces recherches pour voir ce que les clients trouvent déjà sur l'entreprise (pages, avis, photos, articles), puis notez les chiffres dans la partie « Présence en ligne » ci-dessous.</p>
+        <div class="ia-box">
+          <div><b>Recherche automatique par IA</b><div class="muted">L'IA cherche l'entreprise sur le web (site, réseaux sociaux, avis, application, presse) et remplit la fiche. Vous vérifiez ensuite.</div></div>
+          <button class="btn btn-primary" data-action="ia-recherche" data-id="${c.id}">🤖 Rechercher avec l'IA</button>
+        </div>
         <div class="row-btns">${liensRecherche(c).map(([l, u]) => `<a class="btn btn-sm" href="${esc(u)}" target="_blank" rel="noopener">🔎 ${l}</a>`).join('')}</div>
         ${q('Ce que vous avez trouvé en ligne', ca('fiche.recherche', f.recherche, 'Ex. : page Facebook active depuis 2019, beaucoup de commentaires sur la rapidité du service, 2 avis négatifs sur l\'attente, article dans Le Nouvelliste en 2023…', 3), 'mt')}
       </div>
@@ -340,6 +345,62 @@ function viewFiche(c) {
       </div>
     </aside>
   </div>`;
+}
+
+// ---------- Recherche par IA ----------
+let rechercheEnCours = null;
+
+function modalRechercheIA(c) {
+  if (!data.settings.cleApi) {
+    openModal(`<h2>Recherche par IA</h2>
+      <p>Pour que l'application cherche elle-même sur internet, ajoutez d'abord votre clé API Anthropic dans les Paramètres (partie « Recherche par IA »).</p>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button><a class="btn btn-primary" href="#/parametres">Aller aux Paramètres</a></div>`);
+    return;
+  }
+  openModal(`<h2>Rechercher « ${esc(c.nom)} » avec l'IA</h2>
+    <p>L'IA va chercher sur le web le site, les réseaux sociaux, la fiche Google, l'application mobile, les avis et la presse concernant cette entreprise, puis remplir la fiche.</p>
+    <ul class="muted">
+      <li>Durée : 1 à 3 minutes.</li>
+      <li>Coût : facturé à l'usage sur votre compte Anthropic ; le montant estimé est affiché à la fin de la recherche.</li>
+      <li>Les réseaux sociaux ne montrent pas toujours leurs chiffres : certains resteront vides.</li>
+      <li>Les informations proviennent de sources publiques : vérifiez-les avant de les présenter au client.</li>
+    </ul>
+    <label class="check"><input type="checkbox" name="remplacer"> Remplacer aussi les champs déjà remplis</label>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button>
+      <button type="button" class="btn btn-primary" data-action="ia-lancer" data-id="${c.id}">🤖 Lancer la recherche</button></div>`, true);
+}
+
+async function lancerRechercheIA(c, remplacer) {
+  const controle = new AbortController();
+  rechercheEnCours = controle;
+  openModal(`<h2>Recherche en cours…</h2>
+    <div class="ia-progress"><span class="spinner"></span><div>L'IA consulte le web pour « ${esc(c.nom)} ».<div class="muted">Cela prend généralement 1 à 3 minutes. Vous pouvez rester sur cette page.</div></div></div>
+    <div class="modal-actions"><button type="button" class="btn" data-action="ia-annuler">Annuler la recherche</button></div>`);
+  $modal.querySelector('.modal-bg').dataset.action = 'noop';
+  try {
+    const { donnees, usage, cout } = await rechercherEntreprise({ ...c, secteurLabel: secteurLabel(c.secteur) }, data.settings.cleApi, controle.signal);
+    const modifs = donnees.entreprise_trouvee ? fusionnerResultat(c, donnees, remplacer) : [];
+    if (donnees.entreprise_trouvee) { c.fiche.majLe = todayISO(); persist(true); }
+    const coutTxt = `Coût estimé : ${cout.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })} (${usage.recherches} recherche(s) web)`;
+    if (location.hash === `#/client/${c.id}`) render();
+    openModal(donnees.entreprise_trouvee ? `<h2>Recherche terminée</h2>
+      ${donnees.resume ? `<p>${esc(donnees.resume)}</p>` : ''}
+      <h4>${modifs.length} champ(s) rempli(s)</h4>
+      ${modifs.length ? `<div class="chips">${modifs.map(m => `<span class="chip static">${esc(m)}</span>`).join('')}</div>` : '<p class="muted">Aucun champ vide à compléter (cochez « Remplacer » pour mettre à jour les champs existants).</p>'}
+      ${donnees.remarques ? `<p class="hint">${esc(donnees.remarques)}</p>` : ''}
+      ${donnees.sources.length ? `<h4>Sources</h4><ul class="sources">${donnees.sources.map(x => `<li><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.titre || x.url)}</a></li>`).join('')}</ul>` : ''}
+      <p class="muted">${coutTxt}. Le résumé et les sources sont aussi notés dans « Ce que vous avez trouvé en ligne ».</p>
+      <div class="modal-actions"><button type="button" class="btn btn-primary" data-action="close-modal">Vérifier la fiche</button></div>`
+      : `<h2>Entreprise non trouvée</h2>
+      <p>L'IA n'a pas trouvé de source fiable concernant « ${esc(c.nom)} ». ${donnees.remarques ? esc(donnees.remarques) : ''}</p>
+      <p class="muted">Astuce : indiquez la ville dans l'adresse, ou un lien connu (site, page Facebook) dans la fiche, puis relancez. ${coutTxt}.</p>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button></div>`, true);
+  } catch (e) {
+    openModal(`<h2>Recherche interrompue</h2><p>${esc(e.message)}</p>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button></div>`);
+  } finally {
+    rechercheEnCours = null;
+  }
 }
 
 function viewPlans() {
@@ -1019,6 +1080,18 @@ function viewParametres() {
         <label class="full">Conditions de paiement par défaut<textarea data-sbind="conditions" rows="2">${esc(s.conditions)}</textarea></label>
         <label class="full">Mentions en bas de facture (coordonnées bancaires, MonCash…)<textarea data-sbind="mentions" rows="2">${esc(s.mentions)}</textarea></label>
       </div></div>
+    <div class="panel"><h3>Recherche par IA</h3>
+      <p class="muted">Permet au bouton « Rechercher avec l'IA » de la fiche entreprise de chercher les informations publiques sur le web (modèle Claude d'Anthropic).</p>
+      <ol class="muted steps-list">
+        <li>Créez un compte sur <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> et ajoutez du crédit (paiement à l'usage).</li>
+        <li>Dans « API Keys », créez une clé et collez-la ci-dessous.</li>
+        <li>Conseillé : fixez une limite de dépense mensuelle dans la console.</li>
+      </ol>
+      <div class="form-grid">
+        <label class="full">Clé API Anthropic<input type="password" autocomplete="off" data-sbind="cleApi" value="${esc(s.cleApi)}" placeholder="sk-ant-…"></label>
+      </div>
+      <p class="hint">La clé est enregistrée uniquement dans ce navigateur et n'est jamais incluse dans les sauvegardes exportées. N'enregistrez pas votre clé sur un ordinateur partagé. Chaque recherche est facturée à l'usage ; son coût estimé s'affiche à la fin.</p>
+    </div>
     <div class="panel"><h3>Catalogue de prestations</h3>
       <p class="muted">Vos prestations et tarifs habituels : ajoutez-les en un clic dans les honoraires d'un plan.</p>
       <div class="table-wrap flat"><table class="edit">
@@ -1143,6 +1216,9 @@ document.addEventListener('click', e => {
       data.factures.push(copy); persist(true); go(`#/facture/${copy.id}`); toast(`Facture ${copy.numero} créée (brouillon).`);
       break;
     }
+    case 'ia-recherche': modalRechercheIA(clientById(id)); break;
+    case 'ia-lancer': lancerRechercheIA(clientById(id), $modal.querySelector('[name=remplacer]')?.checked); break;
+    case 'ia-annuler': rechercheEnCours?.abort(); break;
     case 'importer-fiche': {
       const c = clientById(p.clientId);
       if (!completude(c)) { toast('La fiche de cette entreprise est vide : remplissez-la d\'abord.', 'err'); break; }
@@ -1190,7 +1266,8 @@ document.addEventListener('click', e => {
     case 'paiement': modalPaiement(f); break;
     case 'del-logo': data.settings.logo = ''; persist(true); render(); break;
     case 'export': {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const copie = { ...data, settings: { ...data.settings, cleApi: '' } };
+      const blob = new Blob([JSON.stringify(copie, null, 2)], { type: 'application/json' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       link.download = `sauvegarde-marketing-${todayISO()}.json`;
@@ -1323,7 +1400,7 @@ document.addEventListener('change', e => {
         if (!Array.isArray(d.plans) || !Array.isArray(d.clients)) throw new Error();
         askConfirm('Remplacer les données actuelles par cette sauvegarde ?', () => {
           const base = defaultData();
-          data = { ...base, ...d, settings: { ...base.settings, ...d.settings }, factures: d.factures || [] };
+          data = { ...base, ...d, settings: { ...base.settings, ...d.settings, cleApi: data.settings.cleApi }, factures: d.factures || [] };
           data.plans.forEach(normaliserPlan); data.clients.forEach(normaliserFiche);
           persist(true); render(); toast('Sauvegarde importée.');
         }, 'Remplacer');

@@ -13,11 +13,12 @@ export const PLATEFORMES = [
   { k: 'google', label: 'Fiche Google (Maps)', champs: ['note', 'avis'], canal: 'Site web / SEO' },
   { k: 'site', label: 'Site web', champs: ['visites'], canal: 'Site web / SEO' },
   { k: 'whatsapp', label: 'WhatsApp Business', champs: ['contacts'], canal: 'WhatsApp Business' },
+  { k: 'appli', label: 'Application mobile', champs: ['telechargements', 'note', 'avis'], canal: 'Application mobile' },
 ];
 
 export const CHAMPS_LABELS = {
   abonnes: 'Abonnés', pubsMois: 'Publications / mois', interactions: 'Interactions moy. / publication',
-  note: 'Note (sur 5)', avis: 'Nombre d\'avis', visites: 'Visites / mois', contacts: 'Contacts',
+  note: 'Note (sur 5)', avis: 'Nombre d\'avis', visites: 'Visites / mois', contacts: 'Contacts', telechargements: 'Téléchargements',
 };
 
 export const SUPPORTS = { logo: 'Logo', charte: 'Charte graphique (couleurs, polices)', photos: 'Photos professionnelles', videos: 'Vidéos', catalogue: 'Catalogue / menu / brochure', fichierClients: 'Fichier clients' };
@@ -125,6 +126,15 @@ export function diagnostic(c) {
     if (num(g.avis) > 0 && num(g.avis) < 10) add('opportunite', `Seulement ${nb(g.avis)} avis Google : chaque nouvel avis renforce la confiance.`);
   }
 
+  const app = el.appli;
+  if (plateformeActive(app)) {
+    add('force', `Application mobile disponible${num(app.telechargements) ? ` (${nb(app.telechargements)} téléchargements)` : ''} : un canal direct vers les clients.`, {
+      action: { canal: 'Application mobile', action: 'Campagne de téléchargement de l\'application (offre sur la 1re commande, notifications)' },
+      objectif: num(app.telechargements) ? { objectif: 'Augmenter les téléchargements de l\'application', indicateur: `Téléchargements (aujourd'hui ${nb(app.telechargements)})`, cible: `${nb(Math.round(num(app.telechargements) * 1.5))} (+50 %)`, echeance: '6 mois' } : undefined,
+    });
+    if (num(app.note) > 0 && num(app.note) < 4) add('faiblesse', `Note de l'application : ${String(app.note).replace('.', ',')}/5 : corriger les points cités dans les avis et inviter les clients satisfaits à noter l'application.`, {
+      action: { canal: 'Application mobile', action: 'Amélioration de la note de l\'application (réponses aux avis, demande d\'avis après livraison)' } });
+  }
   if (!plateformeActive(el.site)) add('opportunite', 'Pas de site web : une page simple ou un catalogue en ligne renforcerait la crédibilité.');
 
   const contacts = num(el.whatsapp.contacts) + num(f.bases.contactsClients);
