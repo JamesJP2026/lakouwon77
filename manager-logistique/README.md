@@ -159,10 +159,17 @@ manager-logistique/
 
 Dans la réception entrepôt et les transferts entre bureaux, chaque colis
 est **enregistré automatiquement dès qu'il est scanné**, sans appuyer sur
-Entrée : l'app reconnaît la frappe très rapide d'une douchette. Un numéro
-tapé à la main attend toujours la touche Entrée, et un numéro collé est
-enregistré tout de suite. Les douchettes qui envoient Entrée après le code
-fonctionnent aussi, sans doublon.
+Entrée, quel que soit le type de douchette :
+
+- douchette rapide (USB) ou numéro collé : enregistré immédiatement ;
+- douchette plus lente (Bluetooth) ou saisie à la main : enregistré après
+  une courte pause (0,7 s par défaut) ;
+- douchette qui envoie Entrée ou Tab après le code : enregistré aussi,
+  sans doublon.
+
+Dans **Paramètres → Scan des colis**, on peut désactiver l'enregistrement
+automatique, allonger la pause, et **tester sa douchette** : le champ de
+test mesure sa vitesse et indique comment elle sera prise en compte.
 
 ## Corriger un numéro de suivi
 

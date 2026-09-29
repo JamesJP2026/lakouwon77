@@ -2235,6 +2235,15 @@ __modules["app"] = (() => {
         <div class="field"><label>Douane (% au-delà du seuil)</label><input type="number" step="0.1" min="0" name="f.douanePct" value="${s.frais.douanePct}"></div>
       </div>
       <p class="muted small">Les nouveaux tarifs s'appliquent aux colis reçus ensuite ; les factures déjà émises ne changent pas.</p>
+      <h3 class="mt">Scan des colis (douchette)</h3>
+      <div class="form-grid">
+        <label class="check"><input type="checkbox" name="scan.auto" ${reglageScan().auto ? "checked" : ""}> Enregistrer automatiquement chaque colis scanné (sans Entrée)</label>
+        <div class="field"><label for="scan-delai">Pause avant enregistrement (douchette lente ou saisie à la main)</label>
+          <select id="scan-delai" name="scan.delai">${[[400, "Courte — 0,4 s"], [700, "Normale — 0,7 s"], [1200, "Longue — 1,2 s"], [2000, "Très longue — 2 s"]].map(([v, l]) => opt(v, l, +v === +reglageScan().delai)).join("")}</select></div>
+      </div>
+      <div class="field"><label for="scan-test">Tester ma douchette : cliquez ici puis scannez une étiquette</label>
+        <input id="scan-test" class="fix-input" autocomplete="off" placeholder="Scannez ici pour mesurer la vitesse de votre douchette"></div>
+      <div id="scan-test-result" class="alert warn">Scannez une étiquette dans ce champ…</div>
       <h3 class="mt">Succursales</h3>
       <div class="table-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Nom</th><th>Ville</th><th>Téléphone</th><th>Rôle</th><th>Ouverte</th></tr></thead><tbody>
         ${s.succursales.map((b, i) => `<tr><td class="mono">${esc(b.id)}</td><td><input name="b.${i}.nom" value="${esc(b.nom)}"></td><td><input name="b.${i}.ville" value="${esc(b.ville)}"></td><td><input name="b.${i}.telephone" value="${esc(b.telephone || "")}"></td><td>${b.type === "origine" ? "Entrepôt d'origine" : "Destination"}</td>
@@ -2965,6 +2974,7 @@ __modules["app"] = (() => {
           else if (p === "b") s.succursales[+a][b] = v;
           else if (p === "pt") s.pointsTransit[+a][b] = v;
           else if (p === "t") s.transporteurs[a] = v;
+          else if (p === "scan") { s.scan = { ...(s.scan || {}), [a]: a === "delai" ? +v || 700 : v }; }
           else if (k === "tauxChange" || k === "diviseurVolumetrique") s[k] = +v || s[k];
         }
         log("Paramètres", "Paramètres mis à jour");
@@ -3093,14 +3103,27 @@ __modules["app"] = (() => {
     render();
   }
   /* ---------- Scan automatique ----------
-     Une douchette tape tout le numéro en quelques millisecondes : dès que la
-     rafale s'arrête, le champ est enregistré sans attendre la touche Entrée.
-     Une saisie au clavier (plus lente) attend toujours Entrée, pour ne jamais
-     enregistrer un numéro à moitié tapé.                                      */
-  const SCAN = { dernier: 0, ecarts: [], minuteur: null, RAFALE_MS: 50, PAUSE_MS: 120 };
+     Le colis est enregistré sans appuyer sur Entrée :
+     - rafale de douchette (caractères très rapprochés), numéro collé ou
+       inséré d'un bloc : enregistrement 0,15 s après la fin du scan ;
+     - frappe plus lente (douchette Bluetooth lente, saisie à la main) :
+       enregistrement après une courte pause (réglable dans Paramètres) ;
+     - douchette qui envoie Tab au lieu d'Entrée : enregistrement quand le
+       champ perd le focus.                                                  */
+  const SCAN = { dernier: 0, ecarts: [], minuteur: null };
+  const reglageScan = () => ({ auto: true, delai: 700, ...(S().scan || {}) });
+  const moyenne = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : Infinity;
   function envoyerScan(el) {
+    clearTimeout(SCAN.minuteur);
     if (!document.body.contains(el) || el.value.trim().length < 4 || !el.form) return;
     el.form.requestSubmit();
+  }
+  function delaiScan(e, el) {
+    const v = el.value.trim();
+    const bloc = (e.data && e.data.length > 1) || ["insertFromPaste", "insertReplacementText", "insertFromDrop"].includes(e.inputType);
+    const rafale = SCAN.ecarts.length >= 3 && moyenne(SCAN.ecarts.slice(-6)) < 60;
+    if (bloc || rafale) return v.length >= 4 ? 150 : null;
+    return v.length >= 6 ? reglageScan().delai : null;
   }
   document.addEventListener("input", e => {
     const el = e.target;
@@ -3108,13 +3131,30 @@ __modules["app"] = (() => {
     const maintenant = performance.now();
     const ecart = maintenant - SCAN.dernier; SCAN.dernier = maintenant;
     clearTimeout(SCAN.minuteur);
-    // Numéro collé d'un coup : enregistré tout de suite
-    if (e.inputType === "insertFromPaste") { if (!/\s/.test(el.value.trim())) envoyerScan(el); return; }
-    if (el.value.length <= 1) { SCAN.ecarts = []; return; }
-    SCAN.ecarts.push(ecart);
-    const recents = SCAN.ecarts.slice(-6);
-    const douchette = recents.length >= 3 && recents.reduce((a, b) => a + b, 0) / recents.length < SCAN.RAFALE_MS;
-    if (douchette) SCAN.minuteur = setTimeout(() => envoyerScan(el), SCAN.PAUSE_MS);
+    if (el.value.trim().length <= 1) SCAN.ecarts = []; else SCAN.ecarts.push(ecart);
+    if (!reglageScan().auto) return;
+    const delai = delaiScan(e, el);
+    if (delai !== null) SCAN.minuteur = setTimeout(() => envoyerScan(el), delai);
+  });
+  document.addEventListener("change", e => {
+    if (e.target.classList?.contains("scan-input") && reglageScan().auto) envoyerScan(e.target);
+  });
+  /* Paramètres : mesure de la vitesse de la douchette */
+  const TEST_SCAN = { dernier: 0, ecarts: [] };
+  document.addEventListener("input", e => {
+    const el = e.target; if (el.id !== "scan-test") return;
+    const t = performance.now(); const ecart = t - TEST_SCAN.dernier; TEST_SCAN.dernier = t;
+    if (el.value.length <= 1) TEST_SCAN.ecarts = []; else TEST_SCAN.ecarts.push(ecart);
+    const out = $("#scan-test-result"); if (!out) return;
+    const bloc = e.data && e.data.length > 1;
+    const m = moyenne(TEST_SCAN.ecarts.slice(-6));
+    const r = reglageScan();
+    out.className = "alert " + (bloc || m < 60 ? "good" : "warn");
+    out.textContent = !r.auto ? "Enregistrement automatique désactivé : appuyez sur Entrée après chaque scan."
+      : bloc ? `Numéro reçu d'un seul bloc (${el.value.length} caractères) : il sera enregistré immédiatement ✓`
+      : el.value.length < 3 ? "Scannez une étiquette dans ce champ…"
+      : m < 60 ? `Douchette détectée ✓ (${Math.round(m)} ms entre caractères) : enregistrement immédiat après le scan.`
+      : `Frappe lente (${Math.round(m)} ms entre caractères) : enregistrement ${num(r.delai / 1000, 1)} s après le dernier caractère.`;
   });
   document.addEventListener("submit", e => {
     clearTimeout(SCAN.minuteur); SCAN.ecarts = [];
