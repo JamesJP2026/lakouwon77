@@ -5,7 +5,7 @@
    valeurs d'exemple : à remplacer dans Paramètres par la
    grille officielle de la compagnie.
 ========================================================= */
-import { numeroTracking, numeroManifeste, numeroTransfert, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut } from "./logic.js";
+import { numeroTracking, numeroManifeste, numeroTransfert, numeroReception, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut } from "./logic.js";
 
 // Succursales ajoutées au réseau (Gonaïves et Saint-Marc : ouverture prochaine)
 const NOUVELLES_SUCCURSALES = [
@@ -60,9 +60,9 @@ const USERS = [
 export function seedData({ empty = false } = {}) {
   const settings = defaultSettings();
   const db = {
-    version: 8, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
-    seq: { client: 0, colis: 0, manifeste: 0, recu: 0, transfert: 0 },
-    clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [], transferts: [],
+    version: 9, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
+    seq: { client: 0, colis: 0, manifeste: 0, recu: 0, transfert: 0, reception: 0 },
+    clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [], transferts: [], receptions: [],
   };
   if (empty) return db;
 
@@ -194,6 +194,14 @@ export function seedData({ empty = false } = {}) {
   tr("PAP", "CAY", 4, [trk[2], trk[3], ext(), ext()], 3, true, "Ricardo (chauffeur)");
   tr("RFT", "PAP", 2.6, [trk[4] || ext(), ext()], 1, false, "Stanley (moto)");
   tr("PAP", "TAB", 0.1, [trk[5] || ext(), ext(), ext()], 0, false, "Frantz (chauffeur)");
+  // Lots de réception à l'entrepôt : colis encore à Miami, regroupés par livraison
+  const aMiami = db.colis.filter(c => c.statut === "recu").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  [[aMiami.slice(0, 5), "Amazon", 5], [aMiami.slice(5), "UPS", aMiami.slice(5).length + 1]].forEach(([cs, livreur, annonce]) => {
+    if (!cs.length) return;
+    const seq = ++db.seq.reception; const date = cs[0].createdAt;
+    db.receptions.push({ id: "rc" + seq, numero: numeroReception(seq, new Date(date)), date, livreur, nombreAnnonce: annonce, colisIds: cs.map(c => c.id), user: "u-miami", note: annonce > cs.length ? "1 colis annoncé non livré par le transporteur" : "" });
+    cs.forEach(c => { c.receptionId = "rc" + seq; });
+  });
   db.journal.push({ id: "j0", date: new Date().toISOString(), user: "u-admin", action: "Initialisation", details: "Données de démonstration chargées" });
   return db;
 }
@@ -271,6 +279,11 @@ export function migrate(db) {
     db.transferts = db.transferts || [];
     db.seq.transfert = db.seq.transfert || 0;
     db.version = 8;
+  }
+  if (db.version < 9) {
+    db.receptions = db.receptions || [];
+    db.seq.reception = db.seq.reception || 0;
+    db.version = 9;
   }
   return db;
 }

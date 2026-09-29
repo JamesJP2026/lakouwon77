@@ -261,6 +261,15 @@ details textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line)
 .big-count { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 6px 0 4px; color: var(--ink-soft); }
 .big-count .num { font-size: 26px; font-weight: 800; color: var(--navy); margin-right: 6px; }
 
+/* ---------- Réception rapide ---------- */
+.cell-input { width: 100%; min-width: 150px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.cell-input.narrow { min-width: 64px; width: 76px; }
+.counter { border: 2px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 6px 0 10px; background: var(--paper); display: grid; gap: 4px; }
+.counter .big-n { font-size: 30px; font-weight: 800; color: var(--navy); margin-right: 4px; }
+.counter.good { border-color: var(--good); background: var(--good-bg); }
+.counter.warn { border-color: var(--orange); background: var(--warn-bg); }
+.counter.bad { border-color: var(--red); background: var(--bad-bg); }
+
 /* ---------- Mobile ---------- */
 @media (max-width: 960px) {
   #app { flex-direction: column; }

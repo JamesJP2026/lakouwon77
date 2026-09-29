@@ -273,6 +273,15 @@ details textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line)
 .big-count { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 6px 0 4px; color: var(--ink-soft); }
 .big-count .num { font-size: 26px; font-weight: 800; color: var(--navy); margin-right: 6px; }
 
+/* ---------- Réception rapide ---------- */
+.cell-input { width: 100%; min-width: 150px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.cell-input.narrow { min-width: 64px; width: 76px; }
+.counter { border: 2px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 6px 0 10px; background: var(--paper); display: grid; gap: 4px; }
+.counter .big-n { font-size: 30px; font-weight: 800; color: var(--navy); margin-right: 4px; }
+.counter.good { border-color: var(--good); background: var(--good-bg); }
+.counter.warn { border-color: var(--orange); background: var(--warn-bg); }
+.counter.bad { border-color: var(--red); background: var(--bad-bg); }
+
 /* ---------- Mobile ---------- */
 @media (max-width: 960px) {
   #app { flex-direction: column; }
@@ -448,6 +457,8 @@ __modules["logic"] = (() => {
   const numeroManifeste = (seq, mode, date = new Date()) =>
     `${mode === "mer" ? "MS" : "MA"}-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
   const numeroTransfert = (seq, date = new Date()) => `TR-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
+  const numeroReception = (seq, date = new Date()) => `RC-${pad(date.getFullYear() % 100, 2)}${pad(date.getMonth() + 1, 2)}-${pad(seq, 3)}`;
+  const LIVREURS_USA = ["Amazon", "UPS", "FedEx", "USPS", "DHL", "OnTrac", "Client (dépôt)", "Autre"];
   const codeClient = seq => `WELJ-${pad(seq, 4)}`;
   const numeroRecu = seq => `R-${pad(seq, 6)}`;
 
@@ -578,7 +589,7 @@ __modules["logic"] = (() => {
   const retardEtape = e => !e.reel && e.prevu && Date.now() > new Date(e.prevu).getTime() + 3600000 ? (Date.now() - new Date(e.prevu).getTime()) / 86400000 : 0;
   /** Écart (jours) entre réalisé et prévu : > 0 = en retard. */
   const ecartEtape = e => e.reel && e.prevu ? (new Date(e.reel) - new Date(e.prevu)) / 86400000 : 0;
-  return { STATUTS, statut, STATUT_ORDER, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode, CATEGORIES, poidsVolumetrique, piedsCubes, calculerFacture, round, money, htg, num, fdate, fdatetime, numeroTracking, numeroManifeste, numeroTransfert, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, DEFAULT_POINTS, ZONE_PAP, itineraireType, etapesPourStatut, retardEtape, ecartEtape };
+  return { STATUTS, statut, STATUT_ORDER, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode, CATEGORIES, poidsVolumetrique, piedsCubes, calculerFacture, round, money, htg, num, fdate, fdatetime, numeroTracking, numeroManifeste, numeroTransfert, numeroReception, LIVREURS_USA, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, DEFAULT_POINTS, ZONE_PAP, itineraireType, etapesPourStatut, retardEtape, ecartEtape };
 })();
 
 __modules["seed"] = (() => {
@@ -589,7 +600,7 @@ __modules["seed"] = (() => {
      valeurs d'exemple : à remplacer dans Paramètres par la
      grille officielle de la compagnie.
   ========================================================= */
-  const {numeroTracking, numeroManifeste, numeroTransfert, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut} = __modules["logic"];
+  const {numeroTracking, numeroManifeste, numeroTransfert, numeroReception, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut} = __modules["logic"];
 
   // Succursales ajoutées au réseau (Gonaïves et Saint-Marc : ouverture prochaine)
   const NOUVELLES_SUCCURSALES = [
@@ -644,9 +655,9 @@ __modules["seed"] = (() => {
   function seedData({ empty = false } = {}) {
     const settings = defaultSettings();
     const db = {
-      version: 8, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
-      seq: { client: 0, colis: 0, manifeste: 0, recu: 0, transfert: 0 },
-      clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [], transferts: [],
+      version: 9, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
+      seq: { client: 0, colis: 0, manifeste: 0, recu: 0, transfert: 0, reception: 0 },
+      clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [], transferts: [], receptions: [],
     };
     if (empty) return db;
 
@@ -778,6 +789,14 @@ __modules["seed"] = (() => {
     tr("PAP", "CAY", 4, [trk[2], trk[3], ext(), ext()], 3, true, "Ricardo (chauffeur)");
     tr("RFT", "PAP", 2.6, [trk[4] || ext(), ext()], 1, false, "Stanley (moto)");
     tr("PAP", "TAB", 0.1, [trk[5] || ext(), ext(), ext()], 0, false, "Frantz (chauffeur)");
+    // Lots de réception à l'entrepôt : colis encore à Miami, regroupés par livraison
+    const aMiami = db.colis.filter(c => c.statut === "recu").sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    [[aMiami.slice(0, 5), "Amazon", 5], [aMiami.slice(5), "UPS", aMiami.slice(5).length + 1]].forEach(([cs, livreur, annonce]) => {
+      if (!cs.length) return;
+      const seq = ++db.seq.reception; const date = cs[0].createdAt;
+      db.receptions.push({ id: "rc" + seq, numero: numeroReception(seq, new Date(date)), date, livreur, nombreAnnonce: annonce, colisIds: cs.map(c => c.id), user: "u-miami", note: annonce > cs.length ? "1 colis annoncé non livré par le transporteur" : "" });
+      cs.forEach(c => { c.receptionId = "rc" + seq; });
+    });
     db.journal.push({ id: "j0", date: new Date().toISOString(), user: "u-admin", action: "Initialisation", details: "Données de démonstration chargées" });
     return db;
   }
@@ -856,6 +875,11 @@ __modules["seed"] = (() => {
       db.seq.transfert = db.seq.transfert || 0;
       db.version = 8;
     }
+    if (db.version < 9) {
+      db.receptions = db.receptions || [];
+      db.seq.reception = db.seq.reception || 0;
+      db.version = 9;
+    }
     return db;
   }
   return { defaultSettings, seedData, bilanManifeste, enregistrerVoyage, syncDatesManifeste, migrate };
@@ -884,7 +908,7 @@ __modules["store"] = (() => {
       db = raw ? JSON.parse(raw) : null;
     } catch { db = null; }
     if (!db || !db.version) { db = seedData(); save(); }
-    else if (db.version < 8) { migrate(db); save(); }
+    else if (db.version < 9) { migrate(db); save(); }
     return db;
   }
 
@@ -1023,7 +1047,7 @@ __modules["app"] = (() => {
      seul gestionnaire d'événements délégué (data-act / data-form).
   ========================================================= */
   const store = __modules["store"];
-  const {STATUTS, statut, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode, CATEGORIES, calculerFacture, poidsVolumetrique, round, money, htg, num, fdate, fdatetime, numeroTracking, numeroManifeste, numeroTransfert, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER, TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,} = __modules["logic"];
+  const {STATUTS, statut, nextStatuts, STATUTS_MANIFESTE, statutManifeste, MANIFESTE_TO_COLIS, METHODES_PAIEMENT, methode, CATEGORIES, calculerFacture, poidsVolumetrique, round, money, htg, num, fdate, fdatetime, numeroTracking, numeroManifeste, numeroTransfert, numeroReception, LIVREURS_USA, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER, TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,} = __modules["logic"];
   const {syncDatesManifeste, bilanManifeste, enregistrerVoyage} = __modules["seed"];
   const {esc, $, $$, openModal, closeModal, confirmBox, EMBED, toast, formData, opt, printHtml, downloadCsv, download} = __modules["ui"];
 
@@ -1123,7 +1147,7 @@ __modules["app"] = (() => {
     caisse: { du: dayKey(), au: dayKey() },
     rapports: { mois: monthKey(new Date()) },
     suivi: { q: "" },
-    reception: { clientId: "", clear: false },
+    reception: { clientId: "", clear: false, mode: "rapide", lot: null },
     navOpen: false,
   };
 
@@ -1279,6 +1303,7 @@ __modules["app"] = (() => {
     const exceptions = by(["probleme"]);
     const stockage = C.filter(c => c.statut === "pret" && daysAgo(lastEventDate(c)) > 7);
     const envoisRetard = db.manifestes.filter(m => retardManifeste(m) > 0);
+    const nbAPeser = aPeser().length;
     const transfertsLents = (db.transferts || []).filter(t => transfertOuvert(t) && daysAgo(t.dateEnvoi) > 2);
 
     // Encaissements par semaine (8 semaines)
@@ -1323,7 +1348,8 @@ __modules["app"] = (() => {
       </section>
       <section class="panel">
         <h3>Alertes</h3>
-        ${exceptions.length || stockage.length || envoisRetard.length || transfertsLents.length ? `<ul class="alerts">
+        ${exceptions.length || stockage.length || envoisRetard.length || transfertsLents.length || nbAPeser ? `<ul class="alerts">
+          ${nbAPeser ? `<li class="alert warn" data-href="reception"><b>Pesée</b> ${nbAPeser} colis reçu(s) à l'entrepôt sans poids : à peser avant facturation</li>` : ""}
           ${transfertsLents.map(t => `<li class="alert warn" data-href="transferts/${t.id}"><b>Transfert</b> ${esc(t.numero)} ${esc(t.origine)} → ${esc(t.destination)} envoyé il y a ${Math.floor(daysAgo(t.dateEnvoi))} jours : ${t.lignes.filter(l => !l.recu).length} colis pas encore confirmés reçus</li>`).join("")}
           ${envoisRetard.map(m => { const e = (m.etapes || []).find(x => retardEtape(x)); return `<li class="alert bad" data-href="manifestes/${m.id}"><b>Retard ${modeIc(m.mode)}</b> ${esc(m.numero)} — ${esc(actionEtape(e.action).short)} à ${esc(pointOf(e.pointId).nom)} prévu le ${fdate(e.prevu)} (${joursTxt(retardEtape(e))})</li>`; }).join("")}
           ${exceptions.map(c => `<li class="alert bad" data-href="colis/${c.id}"><b>Exception</b> ${esc(c.tracking)} — ${esc(c.notes || "à vérifier")}</li>`).join("")}
@@ -1424,10 +1450,88 @@ __modules["app"] = (() => {
   };
 
   /* ---------- Réception entrepôt (Warehouse Receipt) ---------- */
-  VIEWS.reception = () => {
+  VIEWS.reception = id => id ? receptionDetail(id) : ui.reception.mode === "detail" ? receptionDetaillee() : receptionRapide();
+
+  const receptionTabs = () => `<div class="seg">
+    <button class="${ui.reception.mode !== "detail" ? "active" : ""}" data-act="rc-mode" data-id="rapide">Réception rapide (scan)</button>
+    <button class="${ui.reception.mode === "detail" ? "active" : ""}" data-act="rc-mode" data-id="detail">Saisie détaillée</button></div>`;
+  const aPeser = () => db.colis.filter(c => c.aPeser && c.statut === "recu");
+
+  function lotBrouillon() {
+    if (!ui.reception.lot) ui.reception.lot = { livreur: "Amazon", nombreAnnonce: "", clientDefaut: "", service: "air_standard", note: "", lignes: [] };
+    return ui.reception.lot;
+  }
+
+  function receptionRapide() {
+    const L = lotBrouillon();
+    const n = L.lignes.length; const annonce = +L.nombreAnnonce || 0;
+    const pieces = L.lignes.reduce((s, l) => s + (+l.pieces || 1), 0);
+    const tone = !annonce ? "" : n === annonce ? "good" : n < annonce ? "warn" : "bad";
+    const ecartTxt = !annonce ? "Saisissez le nombre annoncé par le livreur pour contrôler l'écart."
+      : n === annonce ? "✓ Le compte est bon." : n < annonce ? `Il manque ${annonce - n} colis par rapport au bordereau du livreur.` : `${n - annonce} colis de plus que le nombre annoncé.`;
+    const historique = [...(db.receptions || [])].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15);
+    const peser = aPeser();
+    return `
+    ${topbar("Réception entrepôt", "Comptez les colis livrés et scannez leur numéro de suivi : chaque lot est enregistré avec sa date", receptionTabs())}
+    <div class="grid-2 wide-left">
+      <section class="panel">
+        <h3>Scanner les colis reçus</h3>
+        <form data-form="rc-scan" class="row-inline">
+          <input name="code" class="scan-input" placeholder="Numéro de suivi (Amazon, UPS, FedEx…) puis Entrée" aria-label="Numéro de suivi" autocomplete="off">
+          <button class="btn btn-primary">Ajouter</button>
+        </form>
+        ${ui.scanMsg ? `<div class="alert ${ui.scanMsg.tone} mt-s">${esc(ui.scanMsg.text)}</div>` : ""}
+        <details class="mt-s"><summary class="link">Coller plusieurs numéros d'un coup</summary>
+          <form data-form="rc-bulk"><textarea name="bulk" rows="4" placeholder="Un numéro de suivi par ligne"></textarea><button class="btn btn-sm mt-s">Ajouter la liste</button></form>
+        </details>
+        <datalist id="clients-list">${db.clients.map(x => `<option value="${esc(clientLabel(x))}">`).join("")}</datalist>
+        <div class="table-wrap mt">${n ? `<table class="tbl"><thead><tr><th>#</th><th>N° de suivi</th><th>Client</th><th>Pièces</th><th>Poids (lb)</th><th></th></tr></thead><tbody>
+          ${L.lignes.map((l, i) => `<tr><td>${n - i}</td><td class="mono">${esc(l.tracking)}</td>
+            <td><input class="cell-input" list="clients-list" data-line="${i}" data-field="clientRef" value="${esc(l.clientRef)}" placeholder="${L.clientDefaut ? "par défaut" : "Code ou nom"}" aria-label="Client du colis ${esc(l.tracking)}"></td>
+            <td><input class="cell-input narrow" type="number" min="1" step="1" data-line="${i}" data-field="pieces" value="${esc(l.pieces)}" aria-label="Pièces"></td>
+            <td><input class="cell-input narrow" type="number" min="0" step="0.1" data-line="${i}" data-field="poids" value="${esc(l.poids)}" placeholder="à peser" aria-label="Poids"></td>
+            <td><button class="btn btn-sm btn-danger" data-act="rc-remove" data-id="${i}" aria-label="Retirer ${esc(l.tracking)}">✕</button></td></tr>`).join("")}
+        </tbody></table>` : empty("Scannez le premier colis. Le compteur avance à chaque numéro.")}</div>
+      </section>
+      <aside>
+        <form class="panel sticky" data-form="rc-save">
+          <h3>Lot de réception</h3>
+          <div class="form-grid">
+            <div class="field"><label for="rc-livreur">Livré par</label><select id="rc-livreur" name="livreur" data-lot="livreur">${LIVREURS_USA.map(x => opt(x, x, x === L.livreur)).join("")}</select></div>
+            <div class="field"><label for="rc-annonce">Nombre annoncé</label><input id="rc-annonce" type="number" min="0" step="1" name="nombreAnnonce" data-lot="nombreAnnonce" value="${esc(L.nombreAnnonce)}" placeholder="ex. 12"></div>
+          </div>
+          <div class="field"><label for="rc-client">Client par défaut</label><input id="rc-client" name="clientDefaut" list="clients-list" data-lot="clientDefaut" value="${esc(L.clientDefaut)}" placeholder="Appliqué aux colis sans client"></div>
+          <div class="field"><label for="rc-service">Service</label><select id="rc-service" name="service" data-lot="service">${S().services.map(x => opt(x.id, x.nom, x.id === L.service)).join("")}</select></div>
+          <div class="field"><label for="rc-note">Note</label><input id="rc-note" name="note" data-lot="note" value="${esc(L.note)}"></div>
+          <div class="counter ${tone}">
+            <div><span class="num big-n">${n}</span> colis scannés${annonce ? ` / <b class="num">${annonce}</b> annoncés` : ""} · ${pieces} pièce(s)</div>
+            <div class="small">${esc(ecartTxt)}</div>
+          </div>
+          <p class="muted small">Sans client, le colis est rangé dans « Colis non identifié » (à réattribuer). Sans poids, il est marqué « à peser » et facturé après la pesée.</p>
+          <div class="form-actions"><button type="button" class="btn" data-act="rc-reset">Vider</button>
+            <button class="btn btn-primary" ${n ? "" : "disabled"}>Enregistrer la réception (${n})</button></div>
+        </form>
+      </aside>
+    </div>
+    <div class="grid-2 wide-left">
+      <section class="panel"><h3>Historique des réceptions</h3>
+        ${historique.length ? `<table class="tbl"><thead><tr><th>N°</th><th>Date</th><th>Livré par</th><th class="r">Annoncés</th><th class="r">Reçus</th><th class="r">Écart</th><th>Reçu par</th></tr></thead><tbody>
+          ${historique.map(r => { const e = r.colisIds.length - (r.nombreAnnonce || r.colisIds.length); return `<tr class="click" data-href="reception/${r.id}">
+            <td class="mono">${esc(r.numero)}</td><td class="nowrap">${fdatetime(r.date)}</td><td>${esc(r.livreur)}</td><td class="num r">${r.nombreAnnonce || "—"}</td><td class="num r"><b>${r.colisIds.length}</b></td>
+            <td class="num r ${e ? "text-bad" : "text-good"}">${!r.nombreAnnonce ? "—" : e ? (e > 0 ? "+" : "") + e : "✓"}</td><td>${esc(userName(r.user))}</td></tr>`; }).join("")}
+        </tbody></table>` : empty("Aucune réception enregistrée.")}
+      </section>
+      <section class="panel"><h3>Colis à peser (${peser.length})</h3>
+        ${peser.length ? `<table class="tbl"><tbody>${peser.map(c => `<tr><td class="mono">${esc(c.trackingFournisseur || c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "")}</td>
+          <td><button class="btn btn-sm btn-primary" data-act="edit-colis" data-id="${c.id}">Peser</button></td></tr>`).join("")}</tbody></table>` : empty("Tous les colis sont pesés.")}
+      </section>
+    </div>`;
+  }
+
+  function receptionDetaillee() {
     const today = db.colis.filter(c => daysAgo(c.createdAt) < 1).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return `
-    ${topbar("Réception entrepôt", "Enregistrer un colis arrivé à l'entrepôt de Fort Lauderdale (warehouse receipt)")}
+    ${topbar("Réception entrepôt", "Saisie complète d'un colis : poids, dimensions, valeur et devis immédiat", receptionTabs())}
     <div class="grid-2 wide-left">
       <form class="panel" data-form="reception" autocomplete="off">
         <h3>Nouveau colis</h3>
@@ -1442,13 +1546,35 @@ __modules["app"] = (() => {
         <section class="panel">
           <h3>Reçus aujourd'hui (${today.length})</h3>
           ${today.length ? `<table class="tbl"><tbody>${today.map(c => `<tr class="click" data-href="colis/${c.id}">
-            <td class="mono">${esc(c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "")}</td><td class="num">${num(c.poids)} lb</td></tr>`).join("")}</tbody></table>` : empty("Aucun colis reçu aujourd'hui.")}
+            <td class="mono">${esc(c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "")}</td><td class="num">${c.aPeser ? '<span class="badge tone-warn">à peser</span>' : num(c.poids) + " lb"}</td></tr>`).join("")}</tbody></table>` : empty("Aucun colis reçu aujourd'hui.")}
         </section>
       </aside>
     </div>`;
-  };
+  }
+
+  function receptionDetail(id) {
+    const r = (db.receptions || []).find(x => x.id === id);
+    if (!r) return topbar("Réception introuvable") + empty(`<a href="#/reception">← Retour</a>`);
+    const cs = r.colisIds.map(colisOf).filter(Boolean);
+    const ecart = r.nombreAnnonce ? cs.length - r.nombreAnnonce : 0;
+    return `
+    ${topbar(`Réception <span class="mono">${esc(r.numero)}</span>`, `${fdatetime(r.date)} · livré par <b>${esc(r.livreur)}</b> · reçu par ${esc(userName(r.user))}`, `
+      <a class="btn" href="#/reception">← Réception</a>
+      <button class="btn btn-primary" data-act="print-labels" data-id="${r.id}">Imprimer les étiquettes</button>`)}
+    <div class="kpi-row">
+      ${kpi("Annoncés par le livreur", r.nombreAnnonce || "—")}
+      ${kpi("Colis reçus", cs.length, "", "good")}
+      ${kpi("Écart", !r.nombreAnnonce ? "—" : ecart ? (ecart > 0 ? "+" : "") + ecart : "0", !r.nombreAnnonce ? "" : ecart < 0 ? "colis manquants" : ecart > 0 ? "colis en trop" : "le compte est bon", ecart ? "bad" : "")}
+      ${kpi("Pièces", cs.reduce((s, c) => s + (+c.pieces || 1), 0))}
+      ${kpi("À peser", cs.filter(c => c.aPeser).length, "", cs.some(c => c.aPeser) ? "warn" : "")}
+    </div>
+    ${r.note ? `<div class="alert warn">${esc(r.note)}</div>` : ""}
+    <section class="panel"><h3>Colis du lot</h3>${colisTable(cs)}</section>`;
+  }
+
   VIEW_MOUNT.reception = () => {
     const form = $('[data-form="reception"]');
+    if (!form) { $("[data-form=rc-scan] input")?.focus(); return; }
     const upd = () => { $("#devis").innerHTML = devisHtml(readColisForm(form)); };
     form.addEventListener("input", upd); form.addEventListener("change", upd); upd();
   };
@@ -1543,7 +1669,7 @@ __modules["app"] = (() => {
       <tbody>${list.map(c => { const sol = soldeColis(c); return `<tr class="${select ? "" : "click"}" ${select ? "" : `data-href="colis/${c.id}"`}>
         ${select ? `<td><input type="checkbox" name="sel" value="${c.id}" aria-label="Sélectionner ${esc(c.tracking)}"></td>` : ""}
         <td class="mono">${esc(c.tracking)}</td><td>${esc(clientOf(c.clientId)?.nom || "—")}</td><td>${esc(c.description)}</td>
-        <td class="num r">${num(c.poids)} lb</td><td>${esc(serviceOf(c.service)?.nom || c.service)}</td><td>${esc(c.destination)}</td>
+        <td class="num r">${c.aPeser ? '<span class="badge tone-warn">à peser</span>' : num(c.poids) + " lb"}</td><td>${esc(serviceOf(c.service)?.nom || c.service)}</td><td>${esc(c.destination)}</td>
         <td>${badge(c.statut)}</td><td class="num r ${sol > 0.009 ? "text-bad" : "text-good"}">${sol > 0.009 ? money(sol) : "Payé"}</td><td>${fdate(c.createdAt)}</td>
         ${removable ? `<td><button class="btn btn-sm btn-danger" data-act="manif-remove" data-id="${c.id}">Retirer</button></td>` : ""}
       </tr>`; }).join("")}</tbody></table></div>`;
@@ -1573,8 +1699,9 @@ __modules["app"] = (() => {
         <dl class="dl">
           <dt>Client</dt><dd>${cl ? `<a href="#/clients/${cl.id}">${esc(clientLabel(cl))}</a><br><span class="muted small">${esc(cl.telephone)}</span>` : "—"}</dd>
           <dt>N° fournisseur</dt><dd class="mono">${esc(c.trackingFournisseur || "—")}</dd>
+          ${c.receptionId && (db.receptions || []).some(r => r.id === c.receptionId) ? `<dt>Lot de réception</dt><dd><a class="mono" href="#/reception/${c.receptionId}">${esc(db.receptions.find(r => r.id === c.receptionId).numero)}</a></dd>` : ""}
           <dt>Contenu</dt><dd>${esc(c.description)} <span class="muted">(${esc(c.categorie)})</span></dd>
-          <dt>Pièces / poids</dt><dd>${c.pieces} pièce(s) — ${num(c.poids)} lb ${c.longueur ? `— ${c.longueur}×${c.largeur}×${c.hauteur} po (vol. ${num(poidsVolumetrique(c, S().diviseurVolumetrique))} lb)` : ""}</dd>
+          <dt>Pièces / poids</dt><dd>${c.pieces} pièce(s) — ${c.aPeser ? '<span class="badge tone-warn">à peser</span>' : num(c.poids) + " lb"} ${c.longueur ? `— ${c.longueur}×${c.largeur}×${c.hauteur} po (vol. ${num(poidsVolumetrique(c, S().diviseurVolumetrique))} lb)` : ""}</dd>
           <dt>Valeur déclarée</dt><dd>${money(c.valeur)} ${c.assurance ? '<span class="badge tone-good">Assuré</span>' : ""}</dd>
           <dt>Service</dt><dd>${esc(serviceOf(c.service)?.nom || c.service)}</dd>
           <dt>Destination</dt><dd>${esc(branch(c.destination)?.nom || c.destination)} ${c.livraisonDomicile ? `<span class="badge tone-accent">Livraison domicile</span><br><span class="muted small">${esc(cl?.adresse || "")}</span>` : ""}</dd>
@@ -2283,6 +2410,10 @@ __modules["app"] = (() => {
       if (!await confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
       store.mutate(() => { m.etapes = itineraireType(m.mode, m.destination, m.dateDepart); syncDatesManifeste(m); });
     },
+    "rc-mode": el => { ui.reception.mode = el.dataset.id; ui.scanMsg = null; render(); },
+    "rc-remove": el => { ui.reception.lot.lignes.splice(+el.dataset.id, 1); ui.scanMsg = null; render(); },
+    "rc-reset": async () => { if (!ui.reception.lot?.lignes.length || await confirmBox("Vider ce lot de réception ?")) { ui.reception.lot = null; ui.scanMsg = null; render(); } },
+    "print-labels": el => { const r = db.receptions.find(x => x.id === el.dataset.id); printLabels(r.colisIds.map(colisOf).filter(Boolean)); },
     "tf-remove": el => { ui.transfert.lignes = ui.transfert.lignes.filter(l => l.tracking !== el.dataset.id); ui.scanMsg = null; render(); },
     "tf-reset": async () => { if (!ui.transfert?.lignes.length || await confirmBox("Vider ce bordereau ?")) { ui.transfert = null; ui.scanMsg = null; render(); } },
     "tf-mark": el => {
@@ -2446,6 +2577,29 @@ __modules["app"] = (() => {
     closeModal();
   };
 
+  function ajouterSuivis(codes) {
+    const L = lotBrouillon(); if (!codes.length) return;
+    const msgs = [];
+    for (const code of codes) {
+      if (L.lignes.some(l => l.tracking === code)) { msgs.push({ tone: "warn", text: `${code} est déjà dans ce lot.` }); continue; }
+      const deja = findColis(code);
+      if (deja) { msgs.push({ tone: "bad", text: `${code} a déjà été reçu le ${fdate(deja.createdAt)} (colis ${deja.tracking}) : non ajouté.` }); continue; }
+      L.lignes.unshift({ tracking: code, clientRef: "", pieces: 1, poids: "" });
+      msgs.push({ tone: "good", text: `✓ ${code} ajouté — ${L.lignes.length} colis scanné(s).` });
+    }
+    ui.scanMsg = msgs.length === 1 ? msgs[0] : { tone: msgs.some(m => m.tone === "bad") ? "bad" : msgs.some(m => m.tone === "warn") ? "warn" : "good", text: msgs.map(m => m.text).join(" ") };
+    render();
+  }
+  /** Client technique qui accueille les colis reçus sans destinataire identifié. */
+  function clientNonIdentifie(db_) {
+    let c = db_.clients.find(x => x.code === "WELJ-0000");
+    if (!c) {
+      c = { id: "c-inconnu", code: "WELJ-0000", nom: "Colis non identifié", type: "particulier", telephone: "", email: "", succursale: "PAP", adresse: "",
+        notes: "Colis reçus sans client : ouvrir le colis puis « Modifier » pour l'attribuer au bon client.", createdAt: store.nowIso() };
+      db_.clients.push(c);
+    }
+    return c;
+  }
   function ajouterTrackings(codes) {
     const d = ui.transfert; if (!d || !codes.length) return;
     let ajoutes = 0; const doublons = [];
@@ -2504,6 +2658,7 @@ __modules["app"] = (() => {
           longueur: d.longueur, largeur: d.largeur, hauteur: d.hauteur, valeur: d.valeur, service: d.service, destination: d.destination,
           assurance: d.assurance, livraisonDomicile: d.livraisonDomicile, remise: d.remise, emplacement: d.emplacement, notes: d.notes,
         });
+        c.aPeser = !(c.poids > 0);
         if (c.statut === "recu" || d.recalculer) c.facture = calculerFacture(c, S());
         log("Modification colis", c.tracking);
       });
@@ -2580,6 +2735,44 @@ __modules["app"] = (() => {
       if (branch(code)) { toast(`Le code ${code} est déjà utilisé`, "bad"); return; }
       store.mutate(db_ => { db_.settings.succursales.push({ id: code, nom: d.nom || "Succursale " + d.ville, ville: d.ville, type: "destination", telephone: "", actif: d.actif }); log("Paramètres", `Succursale ${code} ajoutée`); });
       closeModal(); toast(`Succursale ${code} ajoutée`);
+    },
+    "rc-scan": form => { ajouterSuivis(splitTrackings(form.code.value)); },
+    "rc-bulk": form => { ajouterSuivis(splitTrackings(form.bulk.value)); },
+    "rc-save": async form => {
+      const L = ui.reception.lot; Object.assign(L, formData(form));
+      const n = L.lignes.length; const annonce = +L.nombreAnnonce || 0;
+      if (!n) return;
+      // Client de chaque colis : celui de la ligne, sinon le client par défaut, sinon « non identifié »
+      const inconnus = [];
+      const clients = L.lignes.map(l => { const ref = (l.clientRef || L.clientDefaut || "").trim(); if (!ref) return null; const c = resolveClient(ref); if (!c) inconnus.push(`${l.tracking} (« ${ref} »)`); return c; });
+      if (inconnus.length) { toast(`Client introuvable pour : ${inconnus.join(", ")}. Choisissez-le dans la liste ou créez-le.`, "bad"); return; }
+      if (annonce && annonce !== n && !(await confirmBox(`Écart : ${annonce} colis annoncés, ${n} scannés.\nEnregistrer quand même ? L'écart restera visible dans l'historique.`))) return;
+      let r;
+      store.mutate(db_ => {
+        db_.receptions = db_.receptions || [];
+        const date = store.nowIso();
+        r = { id: store.uid(), numero: numeroReception(store.nextSeq("reception")), date, livreur: L.livreur, nombreAnnonce: annonce, colisIds: [], user: me().id,
+          note: [L.note, annonce && annonce !== n ? `Écart : ${annonce} annoncés, ${n} reçus` : ""].filter(Boolean).join(" — ") };
+        [...L.lignes].reverse().forEach((l, k) => {
+          const cl = clients[n - 1 - k] || clientNonIdentifie(db_);
+          const dest = branch(cl.succursale)?.actif === false ? "PAP" : cl.succursale || "PAP";
+          const poids = +l.poids || 0;
+          const c = {
+            id: store.uid(), tracking: numeroTracking(store.nextSeq("colis")), trackingFournisseur: l.tracking, clientId: cl.id,
+            description: `Colis ${L.livreur}`, categorie: "Divers", pieces: +l.pieces || 1, poids, longueur: 0, largeur: 0, hauteur: 0, valeur: 0,
+            service: L.service, destination: dest, assurance: false, livraisonDomicile: false, remise: 0, statut: "recu", manifesteId: null,
+            emplacement: "", livreur: null, livraison: null, notes: "", createdAt: date, events: [], aPeser: !(poids > 0), receptionId: r.id,
+          };
+          addEvent(c, "recu", `Réception ${r.numero} — livré par ${L.livreur}`, "Fort Lauderdale", date);
+          c.facture = calculerFacture(c, S());
+          db_.colis.push(c); r.colisIds.push(c.id);
+        });
+        db_.receptions.push(r);
+        log("Réception", `${r.numero} : ${n} colis livrés par ${L.livreur}${annonce ? ` (${annonce} annoncés)` : ""}`);
+      });
+      ui.reception.lot = null; ui.scanMsg = null;
+      toast(`Réception ${r.numero} enregistrée : ${n} colis`);
+      go("reception", r.id);
     },
     "tf-scan": form => { ajouterTrackings(splitTrackings(form.code.value)); },
     "tf-bulk": form => { ajouterTrackings(splitTrackings(form.bulk.value)); },
@@ -2710,17 +2903,19 @@ __modules["app"] = (() => {
     const E = S().entreprise;
     return `<div class="doc-head"><div><div class="doc-brand">${esc(E.nom)}</div><div class="small">${esc(E.adresse)}<br>${esc(E.telephone)} · ${esc(E.email)} · ${esc(E.site)}</div></div></div>`;
   }
-  function printLabel(c) {
+  function printLabel(c) { printLabels([c]); }
+  function printLabels(list) { printHtml(`<style>@page{size:4in 6in;margin:0.15in}.label{break-after:page}</style>${list.map(labelHtml).join("")}`, { format: "label" }); }
+  function labelHtml(c) {
     const cl = clientOf(c.clientId); const b = branch(c.destination);
-    printHtml(`<style>@page{size:4in 6in;margin:0.15in}</style><div class="label">
+    return `<div class="label">
       <div class="label-top"><b>${esc(S().entreprise.nom)}</b><span>${esc(serviceOf(c.service)?.nom || "")}</span></div>
       <div class="label-dest">${esc(c.destination)}</div>
       <div class="small">${esc(b?.nom || "")}</div>
       <div class="label-client">${esc(cl?.nom || "")}<br><span class="mono">${esc(cl?.code || "")}</span> · ${esc(cl?.telephone || "")}</div>
       <div class="label-bc">${barcodeSvg(c.tracking, { height: 70, narrow: 2 })}<div class="mono big">${esc(c.tracking)}</div></div>
-      <div class="label-grid"><span>Poids<b>${num(c.poids)} lb</b></span><span>Pièces<b>${c.pieces}</b></span><span>Reçu<b>${fdate(c.createdAt)}</b></span></div>
-      <div class="small">${esc(c.description)}${c.livraisonDomicile ? " — LIVRAISON DOMICILE" : ""}</div>
-    </div>`, { format: "label" });
+      <div class="label-grid"><span>Poids<b>${c.aPeser ? "à peser" : num(c.poids) + " lb"}</b></span><span>Pièces<b>${c.pieces}</b></span><span>Reçu<b>${fdate(c.createdAt)}</b></span></div>
+      <div class="small">${esc(c.description)}${c.trackingFournisseur ? " · " + esc(c.trackingFournisseur) : ""}${c.livraisonDomicile ? " — LIVRAISON DOMICILE" : ""}</div>
+    </div>`;
   }
   function printInvoice(c) {
     const cl = clientOf(c.clientId); const pays = db.paiements.filter(p => p.colisId === c.id); const sol = soldeColis(c);
@@ -2802,6 +2997,12 @@ __modules["app"] = (() => {
   document.addEventListener("input", e => {
     if (e.target.dataset.filter && e.target.type === "search") applyFilter(e.target);
     if (e.target.dataset.draft && ui.transfert) ui.transfert[e.target.dataset.draft] = e.target.value;
+    if (e.target.dataset.lot && ui.reception.lot) ui.reception.lot[e.target.dataset.lot] = e.target.value;
+    if (e.target.dataset.line !== undefined && ui.reception.lot) ui.reception.lot.lignes[+e.target.dataset.line][e.target.dataset.field] = e.target.value;
+  });
+  // Compteurs du lot mis à jour quand on quitte le champ (nombre annoncé, pièces)
+  document.addEventListener("change", e => {
+    if (ui.reception.lot && (e.target.dataset.lot === "nombreAnnonce" || e.target.dataset.field === "pieces")) render();
   });
   document.addEventListener("change", e => { if (e.target.dataset.draft && ui.transfert) ui.transfert[e.target.dataset.draft] = e.target.value; });
   function applyFilter(el) {
