@@ -12,6 +12,8 @@ export function normaliserPlan(p) {
   p.actions = (p.actions || []).map(a => ({ statut: 'a_faire', depense: 0, portee: 0, prospects: 0, ventes: 0, ...a }));
   p.objectifs = (p.objectifs || []).map(o => ({ actuel: '', progression: 0, ...o }));
   if (p.bilan === undefined) p.bilan = '';
+  if (p.motif === undefined) p.motif = '';
+  if (p.motifDetail === undefined) p.motifDetail = '';
   if (p.afficherResultats === undefined) p.afficherResultats = false;
   return p;
 }
@@ -24,6 +26,7 @@ export function scorePlan(p) {
   const add = (ok, texte, step, poids = 1) => checks.push({ ok, texte, step, poids });
   const budget = p.actions.reduce((s, a) => s + num(a.budget), 0);
 
+  add(rempli(p.motif) && (p.motif !== 'autre' || rempli(p.motifDetail)), 'Indiquez le motif du plan : pourquoi l\'entreprise a besoin de ce plan.', 'infos', 2);
   add(rempli(p.resume), 'Rédigez un résumé : c\'est la première chose que lira le client.', 'infos');
   add(rempli(p.contexte), 'Décrivez la situation actuelle de l\'entreprise.', 'analyse');
   add(['forces', 'faiblesses', 'opportunites', 'menaces'].every(k => rempli(p.swot[k])), 'Complétez les 4 cases de l\'analyse SWOT.', 'analyse');

@@ -2,7 +2,7 @@ import {
   load, save, defaultData, uid, esc, nl2br, num, fmt, todayISO, addDays, addMonths,
   dateFr, dateCourte, totauxFacture, budgetActions, totalHonoraires,
 } from './store.js';
-import { SECTEURS, CANAUX, suggestions } from './secteurs.js';
+import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
 let data = load();
@@ -27,6 +27,8 @@ const clientById = id => data.clients.find(c => c.id === id);
 const planById = id => data.plans.find(p => p.id === id);
 const factureById = id => data.factures.find(f => f.id === id);
 const secteurLabel = k => SECTEURS[k]?.label || 'Autre secteur';
+const motifLabel = p => p.motif === 'autre' ? (p.motifDetail || 'Autre').split('\n')[0] : (MOTIFS[p.motif] || '');
+const motifOptions = sel => `<option value="">— Choisir la raison du plan —</option>${Object.entries(MOTIFS).map(([k, l]) => `<option value="${k}" ${sel === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}`;
 
 const STATUTS_PLAN = { brouillon: 'Brouillon', presente: 'Présenté', accepte: 'Accepté', refuse: 'Refusé' };
 const STATUTS_FACT = { brouillon: 'Brouillon', envoyee: 'Envoyée', partielle: 'Payée partiellement', payee: 'Payée', annulee: 'Annulée' };
@@ -69,10 +71,11 @@ const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
 const go = hash => { location.hash = hash; };
 
 // ---------- Modèle de plan ----------
-function nouveauPlan({ clientId, titre, debut, fin, budgetPrevu, prefill }) {
+function nouveauPlan({ clientId, titre, motif = '', motifDetail = '', debut, fin, budgetPrevu, prefill }) {
   const client = clientById(clientId);
   const p = {
     id: uid(), clientId, titre, statut: 'brouillon', creeLe: todayISO(), datePresentation: '',
+    motif, motifDetail: String(motifDetail).trim(),
     debut, fin, budgetPrevu: num(budgetPrevu),
     resume: '', contexte: '', concurrents: '',
     swot: { forces: '', faiblesses: '', opportunites: '', menaces: '' },
@@ -232,14 +235,14 @@ const scoreBadge = n => `<span class="score ${n >= 80 ? 'good' : n >= 50 ? 'mid'
 function viewPlans() {
   const f = filtres.plans;
   const plans = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || ''))
-    .filter(p => (!f.statut || p.statut === f.statut) && contient(p.titre + ' ' + (clientById(p.clientId)?.nom || ''), f.q));
+    .filter(p => (!f.statut || p.statut === f.statut) && contient(`${p.titre} ${motifLabel(p)} ${p.motifDetail} ${clientById(p.clientId)?.nom || ''}`, f.q));
   return topbar('Plans marketing', 'Créez, présentez puis facturez vos plans marketing et publicitaires',
     `<button class="btn btn-primary" data-action="new-plan-for">+ Nouveau plan</button>`) +
     (data.plans.length ? barreFiltres('plans', STATUTS_PLAN) : '') +
     (plans.length ? `<div class="table-wrap"><table>
       <thead><tr><th>Plan</th><th>Période</th><th class="r">Budget actions</th><th class="r">Honoraires</th><th class="c">Qualité</th><th>Statut</th><th></th></tr></thead>
       <tbody>${plans.map(p => `<tr>
-        <td><b>${esc(p.titre)}</b><div class="muted">${esc(clientById(p.clientId)?.nom || '—')}</div></td>
+        <td><b>${esc(p.titre)}</b><div class="muted">${esc(clientById(p.clientId)?.nom || '—')}</div>${p.motif ? `<div class="motif-tag">${esc(motifLabel(p))}</div>` : ''}</td>
         <td class="nowrap">${dateCourte(p.debut)} → ${dateCourte(p.fin)}</td>
         <td class="r num">${money(budgetActions(p))}</td>
         <td class="r num">${money(totalHonoraires(p))}</td>
@@ -303,6 +306,8 @@ function modalNouveauPlan(clientId = '') {
       <div class="form-grid">
         <label class="full">Entreprise cliente *<select name="clientId" required>${data.clients.map(c => `<option value="${c.id}" ${c.id === clientId ? 'selected' : ''}>${esc(c.nom)} — ${esc(secteurLabel(c.secteur))}</option>`).join('')}</select></label>
         <label class="full">Titre du plan *<input name="titre" required value="Plan marketing ${new Date().getFullYear()}"></label>
+        <label class="full">Motif du plan *<select name="motif" required>${motifOptions('')}</select></label>
+        <label class="full">Précisez la raison du plan<textarea name="motifDetail" rows="2" placeholder="Ex. : l'entreprise ouvre une 2e boutique à Pétion-Ville en décembre et veut attirer une nouvelle clientèle."></textarea></label>
         <label>Début<input type="date" name="debut" value="${debut}" required></label>
         <label>Fin<input type="date" name="fin" value="${addMonths(debut, 6)}" required></label>
         <label class="full">Budget publicitaire envisagé (${esc(data.settings.devise)})<input name="budgetPrevu" type="number" min="0" step="any" value="0"></label>
@@ -340,6 +345,8 @@ function stepContent(p, step) {
     case 'infos': return `
       <div class="form-grid">
         ${field('Titre du plan', inp('titre', p.titre), 'full')}
+        ${field('Motif du plan', `<select data-bind="motif">${motifOptions(p.motif)}</select>`, 'full')}
+        ${field('Raison du plan (détails)', area('motifDetail', p.motifDetail, 'Pourquoi l\'entreprise a besoin de ce plan maintenant ? Ex. : baisse des ventes depuis 3 mois, arrivée d\'un concurrent, nouveau produit…', 3), 'full')}
         ${field('Entreprise cliente', `<select data-bind="clientId">${data.clients.map(c => `<option value="${c.id}" ${c.id === p.clientId ? 'selected' : ''}>${esc(c.nom)}</option>`).join('')}</select>`)}
         ${field(`Budget publicitaire envisagé (${devise})`, numInp('budgetPrevu', p.budgetPrevu))}
         ${field('Début de la campagne', inp('debut', p.debut, 'type="date"'))}
@@ -581,6 +588,7 @@ function viewPresentation(p) {
       <div class="cover-kicker">Plan marketing & publicitaire</div>
       <h1>${esc(p.titre)}</h1>
       <div class="cover-client">Préparé pour <b>${esc(c.nom || '')}</b> — ${esc(secteurLabel(c.secteur))}</div>
+      ${p.motif ? `<div class="cover-motif"><span>Motif du plan</span>${esc(motifLabel(p))}</div>` : ''}
       <div class="cover-meta">
         <div><span>Période</span><b>${dateFr(p.debut)} → ${dateFr(p.fin)}</b></div>
         <div><span>Budget des actions</span><b>${money(total)}</b></div>
@@ -588,7 +596,8 @@ function viewPresentation(p) {
       </div>
     </header>
 
-    ${section(++n, 'Résumé', p.resume ? `<p class="lead">${nl2br(p.resume)}</p>` : '<p class="muted">—</p>')}
+    ${section(++n, 'Raison du plan et résumé', `${p.motif || p.motifDetail ? `<div class="motif-box"><b>${esc(p.motif === 'autre' ? 'Raison du plan' : motifLabel(p) || 'Raison du plan')}</b>${p.motifDetail ? `<p>${nl2br(p.motifDetail)}</p>` : ''}</div>` : ''}
+      ${p.resume ? `<p class="lead">${nl2br(p.resume)}</p>` : p.motif ? '' : '<p class="muted">—</p>'}`)}
 
     ${section(++n, 'Analyse de la situation', para('Situation actuelle', p.contexte) + para('Marché et concurrence', p.concurrents) + `
       <div class="swot">
@@ -1072,6 +1081,7 @@ function handleForm(form) {
     if (id) Object.assign(clientById(id), fields); else data.clients.push({ id: uid(), ...fields });
     persist(true); closeModal(); render(); toast('Entreprise enregistrée.');
   } else if (kind === 'plan') {
+    if (fd.motif === 'autre' && !fd.motifDetail.trim()) { toast('Précisez la raison du plan.', 'err'); form.querySelector('[name=motifDetail]').focus(); return; }
     if (fd.fin < fd.debut) { toast('La date de fin doit être après la date de début.', 'err'); return; }
     const p = nouveauPlan({ ...fd, prefill: !!fd.prefill });
     data.plans.push(p); persist(true); closeModal(); go(`#/plan/${p.id}/infos`);
@@ -1174,6 +1184,8 @@ function chargerDemo() {
   data.clients.push(c);
   const debut = todayISO();
   const p = nouveauPlan({ clientId: c.id, titre: 'Lancement de la livraison à domicile', debut, fin: addMonths(debut, 6), budgetPrevu: 150000, prefill: true });
+  p.motif = 'lancement_produit';
+  p.motifDetail = 'La boulangerie lance un service de livraison à domicile et de commande par WhatsApp, et veut le faire savoir rapidement dans le quartier.';
   p.resume = 'La Boulangerie Soleil Levant est appréciée pour la qualité de ses produits mais reste peu visible en ligne. Nous proposons une campagne de 6 mois pour lancer la commande via WhatsApp et la livraison à domicile, en s\'appuyant sur Facebook/Instagram et un programme de fidélité.';
   p.contexte = 'Boulangerie-pâtisserie ouverte depuis 8 ans, 6 employés.\nVentes stables mais concentrées le matin.\nPage Facebook peu active (1 200 abonnés).';
   p.messageCle = 'Du pain frais et des pâtisseries maison, livrés chez vous en moins de 45 minutes.';

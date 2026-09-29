@@ -2,6 +2,24 @@
 // ou à proposer des idées en un clic : l'utilisateur garde la main sur
 // tout le contenu et peut tout modifier.
 
+// Raisons pour lesquelles une entreprise commande un plan marketing.
+export const MOTIFS = {
+  lancement_entreprise: 'Lancement d\'une nouvelle entreprise',
+  lancement_produit: 'Lancement d\'un nouveau produit ou service',
+  ventes: 'Augmenter les ventes',
+  notoriete: 'Faire connaître la marque (notoriété)',
+  ouverture: 'Ouverture d\'un nouveau point de vente / d\'une succursale',
+  saison: 'Promotion saisonnière (fêtes, rentrée, carnaval…)',
+  evenement: 'Promotion d\'un événement',
+  image: 'Changer ou moderniser l\'image de marque',
+  relance: 'Relancer une activité en baisse / reconquérir des clients',
+  marche: 'Conquérir un nouveau marché (autre ville, diaspora, export)',
+  fidelisation: 'Fidéliser la clientèle',
+  collecte: 'Collecte de fonds / mobilisation (ONG, église)',
+  recrutement: 'Recrutement / inscriptions',
+  autre: 'Autre (à préciser)',
+};
+
 export const CANAUX = [
   'Facebook / Instagram', 'TikTok', 'WhatsApp Business', 'Google Ads', 'Site web / SEO',
   'Email marketing', 'SMS', 'Radio', 'Télévision', 'Presse écrite', 'Affichage / panneaux',

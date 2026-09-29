@@ -27,7 +27,7 @@ de bord crée un client et un plan complet pour découvrir l'application.
    ONG, autre).
 3. **Plan marketing** en 8 étapes, contenu saisi par l'utilisateur,
    enregistré automatiquement :
-   informations & résumé · analyse & SWOT · objectifs SMART · cibles (personas)
+   informations (motif du plan, résumé) · analyse & SWOT · objectifs SMART · cibles (personas)
    · stratégie (positionnement, message, slogan, marketing mix 4P)
    · actions & budget par canal · suivi (KPIs, reporting, risques)
    · honoraires. Des **suggestions adaptées au secteur** peuvent pré-remplir
