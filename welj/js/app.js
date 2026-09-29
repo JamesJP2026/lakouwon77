@@ -10,7 +10,7 @@ import {
   numeroTracking, numeroManifeste, codeClient, numeroRecu, barcodeSvg, messageStatut, waLink, STATUT_ORDER,
   TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,
 } from "./logic.js";
-import { syncDatesManifeste } from "./seed.js";
+import { syncDatesManifeste, bilanManifeste, enregistrerVoyage } from "./seed.js";
 import { esc, $, $$, openModal, closeModal, confirmBox, toast, formData, opt, printHtml, downloadCsv, download } from "./ui.js";
 
 /* ---------- Rôles & navigation ---------- */
@@ -25,7 +25,7 @@ const NAV = [
   { id: "acheminement", label: "Acheminement USA → Haïti", ic: "⇄" },
   { id: "reception",  label: "Réception entrepôt",   ic: "⇲" },
   { id: "colis",      label: "Colis",                ic: "▣" },
-  { id: "manifestes", label: "Manifestes / Envois",  ic: "✈" },
+  { id: "manifestes", label: "Voyages / Manifestes", ic: "✈" },
   { id: "comptoir",   label: "Retrait & livraison",  ic: "⇱" },
   { id: "clients",    label: "Clients",              ic: "☺" },
   { id: "caisse",     label: "Caisse & paiements",   ic: "$" },
@@ -56,6 +56,9 @@ const lastEventDate = c => c.events.at(-1)?.date || c.createdAt;
 const dayKey = (d = new Date()) => { d = new Date(d); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const monthKey = d => dayKey(d).slice(0, 7);
 
+/** Options des succursales de destination ; celles pas encore ouvertes sont visibles mais non sélectionnables. */
+const destOptions = (selected, { all = false } = {}) => S().succursales.filter(b => b.type === "destination")
+  .map(b => b.actif === false && !all ? `<option value="${esc(b.id)}" disabled>${esc(b.nom)} — bientôt</option>` : opt(b.id, b.nom + (b.actif === false ? " (bientôt)" : ""), b.id === selected)).join("");
 const pointOf = id => S().pointsTransit.find(p => p.id === id)
   || (branch(id) && { id, nom: branch(id).nom, code: id, ville: branch(id).ville, pays: branch(id).type === "origine" ? "USA" : "Haïti", type: "succursale" })
   || { id, nom: id, code: id, ville: "", pays: "", type: "autre" };
@@ -95,7 +98,7 @@ function setManifesteStatut(m, st, { note = "", lieu, date } = {}) {
 const ui = {
   colis: { q: "", statut: "", dest: "" },
   clients: { q: "" },
-  manifestes: { statut: "" },
+  manifestes: { statut: "", mode: "", mois: "" },
   acheminement: { mode: "", vue: "encours" },
   comptoir: { tab: "pret", branche: "" },
   caisse: { du: dayKey(), au: dayKey() },
@@ -211,7 +214,7 @@ function routeStrip(m, { compact = false } = {}) {
       <div class="route-act">${esc(a.short)}</div>
       <div class="route-date">${e.reel ? fdatetime(e.reel) : `<span class="muted">prévu</span> ${fdatetime(e.prevu)}`}</div>
       ${e.reel && ecart > 0.5 ? `<div class="route-flag bad">+${joursTxt(ecart)}</div>` : ""}
-      ${late ? `<div class="route-flag bad">Retard ${joursTxt(late)}</div>` : ""}
+      ${late && e === next ? `<div class="route-flag bad">Retard ${joursTxt(late)}</div>` : ""}
     </div>`;
   }).join("")}</div>`;
 }
@@ -219,6 +222,9 @@ function badgeRetard(m) {
   const r = retardManifeste(m);
   return r ? `<span class="badge tone-bad">⚠ Retard ${joursTxt(r)}</span>` : enCours(m) && m.statut !== "ouvert" ? `<span class="badge tone-good">À l'heure</span>` : "";
 }
+/** Quantités du voyage : figées au départ, sinon calculées sur le chargement en cours. */
+const bilanOf = m => m.bilan || bilanManifeste(m, db.colis);
+const dateEnvoi = m => m.bilan?.dateEnvoi || m.dateDepart;
 const transportInfo = m => [m.mode === "mer" ? m.navire : m.vol, m.conteneur ? "Cont. " + m.conteneur : ""].filter(Boolean).join(" · ");
 
 /* =========================================================
@@ -441,7 +447,7 @@ function colisFields(c = {}) {
   </div>
   <div class="form-grid">
     <div class="field"><label>Service</label><select name="service">${S_.services.map(s => opt(s.id, `${s.nom} (${s.delai})`, s.id === c.service)).join("")}</select></div>
-    <div class="field"><label>Destination</label><select name="destination">${S_.succursales.filter(b => b.type === "destination").map(b => opt(b.id, b.nom, b.id === c.destination)).join("")}</select></div>
+    <div class="field"><label>Destination</label><select name="destination">${destOptions(c.destination)}</select></div>
   </div>
   <div class="form-grid">
     <label class="check"><input type="checkbox" name="assurance" ${c.assurance ? "checked" : ""}> Assurance (${S_.frais.assurancePct} % de la valeur)</label>
@@ -492,7 +498,7 @@ VIEWS.colis = id => {
   <div class="filters">
     <input class="search" type="search" placeholder="Rechercher : n° WELJ, n° fournisseur, client, contenu…" data-filter="colis.q" value="${esc(f.q)}">
     <select data-filter="colis.statut">${opt("", "Tous les statuts")}${STATUTS.map(s => opt(s.id, s.label, s.id === f.statut)).join("")}</select>
-    <select data-filter="colis.dest">${opt("", "Toutes destinations")}${S().succursales.filter(b => b.type === "destination").map(b => opt(b.id, b.nom, b.id === f.dest)).join("")}</select>
+    <select data-filter="colis.dest">${opt("", "Toutes destinations")}${destOptions(f.dest, { all: true })}</select>
   </div>
   ${colisTable(list)}`;
 };
@@ -577,16 +583,51 @@ function timeline(c) {
 /* ---------- Manifestes (consolidation) ---------- */
 VIEWS.manifestes = id => {
   if (id) return manifesteDetail(id);
-  const list = db.manifestes.filter(m => !ui.manifestes.statut || m.statut === ui.manifestes.statut).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const f = ui.manifestes;
+  const list = db.manifestes.filter(m => (!f.statut || m.statut === f.statut) && (!f.mode || m.mode === f.mode) && (!f.mois || monthKey(dateEnvoi(m)) === f.mois))
+    .sort((a, b) => String(dateEnvoi(b)).localeCompare(String(dateEnvoi(a))));
+  const mois = [...new Set(db.manifestes.map(m => monthKey(dateEnvoi(m))))].sort().reverse();
+  const B = list.map(m => bilanOf(m));
+  const tot = k => B.reduce((s, b) => s + b[k], 0);
+  // Récapitulatif mensuel (voyages partis uniquement)
+  const recap = new Map();
+  db.manifestes.filter(m => m.bilan && (!f.mode || m.mode === f.mode)).forEach(m => {
+    const k = monthKey(m.bilan.dateEnvoi); const g = recap.get(k) || { air: 0, mer: 0, colis: 0, poids: 0, fret: 0 };
+    g[m.mode]++; g.colis += m.bilan.colis; g.poids += m.bilan.poids; g.fret += m.bilan.fret; recap.set(k, g);
+  });
+  const seg = items => `<div class="seg">${items.map(([v, l]) => `<button class="${f.mode === v ? "active" : ""}" data-act="man-mode" data-id="${v}">${l}</button>`).join("")}</div>`;
   return `
-  ${topbar("Manifestes / Envois", "Consolidation des colis par vol (AWB) ou conteneur (BL)", can("reception") || isAdmin() ? `<button class="btn btn-primary" data-act="new-manifeste">+ Nouveau manifeste</button>` : "")}
-  <div class="filters"><select data-filter="manifestes.statut">${opt("", "Tous les statuts")}${STATUTS_MANIFESTE.map(s => opt(s.id, s.label, s.id === ui.manifestes.statut)).join("")}</select></div>
-  ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>N°</th><th>Mode</th><th>Transporteur</th><th>Référence</th><th>Trajet</th><th class="r">Colis</th><th class="r">Poids</th><th>Départ</th><th>ETA</th><th>Statut</th></tr></thead><tbody>
-    ${list.map(m => { const cs = db.colis.filter(c => c.manifesteId === m.id); return `<tr class="click" data-href="manifestes/${m.id}">
-      <td class="mono">${esc(m.numero)}</td><td>${modeIc(m.mode)} ${modeLabel(m.mode)}</td><td>${esc(m.transporteur)}<div class="muted small">${esc(transportInfo(m))}</div></td><td class="mono">${esc(m.reference)}</td>
-      <td>${esc(m.origine)} → ${esc(m.destination)}</td><td class="num r">${cs.length}</td><td class="num r">${num(cs.reduce((s, c) => s + +c.poids, 0))} lb</td>
-      <td>${fdate(m.dateDepart)}</td><td>${fdate(m.eta)}</td><td>${badgeM(m.statut)} ${retardManifeste(m) ? badgeRetard(m) : ""}</td></tr>`; }).join("")}
-  </tbody></table></div>` : empty("Aucun manifeste.")}`;
+  ${topbar("Registre des voyages", "Chaque voyage (vol ou bateau) avec sa date d'envoi et les quantités chargées — enregistrées au départ",
+    `<button class="btn" data-act="export-voyages">Exporter CSV</button><button class="btn" data-act="print-voyages">Imprimer le registre</button>${can("reception") || isAdmin() ? `<button class="btn btn-primary" data-act="new-manifeste">+ Nouveau voyage</button>` : ""}`)}
+  <div class="filters">
+    ${seg([["", "Tous"], ["air", "✈ Avion"], ["mer", "⛴ Bateau"]])}
+    <select data-filter="manifestes.mois" aria-label="Mois d'envoi">${opt("", "Toutes les dates")}${mois.map(k => opt(k, new Date(k + "-15T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" }), k === f.mois)).join("")}</select>
+    <select data-filter="manifestes.statut">${opt("", "Tous les statuts")}${STATUTS_MANIFESTE.map(x => opt(x.id, x.label, x.id === f.statut)).join("")}</select>
+  </div>
+  <div class="kpi-row">
+    ${kpi("Voyages", list.length, `✈ ${list.filter(m => m.mode === "air").length} · ⛴ ${list.filter(m => m.mode === "mer").length}`)}
+    ${kpi("Colis", tot("colis"), `${tot("pieces")} pièce(s)`)}
+    ${kpi("Poids total", num(tot("poids")) + " lb")}
+    ${kpi("Valeur déclarée", money(tot("valeur")))}
+    ${kpi("Fret facturé", money(tot("fret")), "", "good")}
+  </div>
+  ${list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>Date d'envoi</th><th>N° voyage</th><th>Mode</th><th>Transporteur / vol / navire</th><th>Destination</th>
+    <th class="r">Colis</th><th class="r">Pièces</th><th class="r">Poids</th><th class="r">Valeur</th><th class="r">Fret</th><th>Arrivée Haïti</th><th>Statut</th></tr></thead><tbody>
+    ${list.map((m, i) => { const b = B[i]; return `<tr class="click" data-href="manifestes/${m.id}">
+      <td class="nowrap">${fdatetime(dateEnvoi(m))}${m.bilan ? "" : `<div class="muted small">prévu — non parti</div>`}</td>
+      <td class="mono">${esc(m.numero)}</td><td class="nowrap">${modeIc(m.mode)} ${m.mode === "mer" ? "Bateau" : "Avion"}</td>
+      <td>${esc(m.transporteur)}<div class="muted small">${esc(transportInfo(m))}</div></td><td>${esc(branch(m.destination)?.nom || m.destination)}</td>
+      <td class="num r"><b>${b.colis}</b></td><td class="num r">${b.pieces}</td><td class="num r">${num(b.poids)} lb</td><td class="num r">${money(b.valeur)}</td><td class="num r">${money(b.fret)}</td>
+      <td class="nowrap">${fdate(m.eta)}</td><td>${badgeM(m.statut)} ${retardManifeste(m) ? badgeRetard(m) : ""}</td></tr>`; }).join("")}
+    <tr class="total"><td colspan="5">Total — ${list.length} voyage(s)</td><td class="num r">${tot("colis")}</td><td class="num r">${tot("pieces")}</td><td class="num r">${num(tot("poids"))} lb</td><td class="num r">${money(tot("valeur"))}</td><td class="num r">${money(tot("fret"))}</td><td colspan="2"></td></tr>
+  </tbody></table></div>` : empty("Aucun voyage pour ces critères.")}
+  <section class="panel mt"><h3>Récapitulatif mensuel des envois</h3>
+    <p class="muted small">Voyages partis, par mois de départ.</p>
+    ${recap.size ? `<table class="tbl"><thead><tr><th>Mois</th><th class="r">Voyages ✈</th><th class="r">Voyages ⛴</th><th class="r">Colis envoyés</th><th class="r">Poids</th><th class="r">Fret</th></tr></thead><tbody>
+      ${[...recap.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([k, g]) => `<tr><td>${new Date(k + "-15T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</td>
+        <td class="num r">${g.air}</td><td class="num r">${g.mer}</td><td class="num r"><b>${g.colis}</b></td><td class="num r">${num(g.poids)} lb</td><td class="num r">${money(g.fret)}</td></tr>`).join("")}
+    </tbody></table>` : empty("Aucun voyage parti.")}
+  </section>`;
 };
 function manifesteDetail(id) {
   const m = manifesteOf(id);
@@ -610,6 +651,8 @@ function manifesteDetail(id) {
     ${kpi("Fret facturé", money(cs.reduce((s, c) => s + c.facture.total, 0)), "", "good")}
     ${kpi("Départ → arrivée", fdate(m.dateDepart), "Arrivée Haïti " + fdate(m.eta))}
   </div>
+  ${m.bilan ? `<div class="alert good">📋 Voyage enregistré : envoyé le <b>${fdatetime(m.bilan.dateEnvoi)}</b> avec <b>${m.bilan.colis} colis</b> (${m.bilan.pieces} pièces, ${num(m.bilan.poids)} lb, fret ${money(m.bilan.fret)}).</div>`
+    : `<div class="alert warn">Voyage pas encore parti : la date d'envoi et le nombre de colis seront enregistrés à la validation de l'étape « Départ ».</div>`}
   <section class="panel">
     <div class="panel-head"><h3>Itinéraire & points de transit</h3>
       <div class="row-inline">
@@ -662,7 +705,7 @@ VIEWS.comptoir = () => {
       <input name="code" placeholder="Scanner ou saisir un n° WELJ (douchette code-barres)" aria-label="Numéro de colis" autofocus>
       <button class="btn btn-primary">Ouvrir</button>
     </form>
-    ${u.role !== "livreur" ? `<select data-filter="comptoir.branche" aria-label="Succursale">${S().succursales.filter(b => b.type === "destination").map(b => opt(b.id, b.nom, b.id === br)).join("")}</select>` : ""}
+    ${u.role !== "livreur" ? `<select data-filter="comptoir.branche" aria-label="Succursale">${destOptions(br, { all: true })}</select>` : ""}
   </div>
   ${u.role !== "livreur" ? `<div class="tabs">${tabs.map(t => `<button class="tab ${t.id === tab.id ? "active" : ""}" data-act="comptoir-tab" data-id="${t.id}">${t.label} <span class="count">${db.colis.filter(c => c.destination === br && t.st.includes(c.statut) && (t.id !== "livre" || daysAgo(lastEventDate(c)) < 1)).length}</span></button>`).join("")}</div>` : ""}
   ${list.length ? `<div class="cards">${list.map(c => { const cl = clientOf(c.clientId); const sol = soldeColis(c); return `
@@ -747,7 +790,7 @@ function clientForm(c = {}) {
     </div>
     <div class="form-grid">
       <div class="field"><label>Type</label><select name="type">${opt("particulier", "Particulier", c.type !== "entreprise")}${opt("entreprise", "Entreprise", c.type === "entreprise")}</select></div>
-      <div class="field"><label>Succursale de retrait</label><select name="succursale">${S().succursales.filter(b => b.type === "destination").map(b => opt(b.id, b.nom, b.id === c.succursale)).join("")}</select></div>
+      <div class="field"><label>Succursale de retrait</label><select name="succursale">${destOptions(c.succursale)}</select></div>
     </div>
     <div class="field"><label>Adresse en Haïti (livraison)</label><input name="adresse" value="${esc(c.adresse || "")}"></div>
     <div class="field"><label>Notes</label><input name="notes" value="${esc(c.notes || "")}"></div>
@@ -876,6 +919,8 @@ VIEWS.parametres = () => {
         <td><input name="s.${i}.delai" value="${esc(v.delai)}"></td></tr>`).join("")}
     </tbody></table></div>
     <div class="form-grid g4 mt">
+      <div class="field"><label>Transporteur maritime (bateau)</label><input name="t.mer" value="${esc(s.transporteurs.mer)}"></div>
+      <div class="field"><label>Transporteur aérien (avion)</label><input name="t.air" value="${esc(s.transporteurs.air)}"></div>
       <div class="field"><label>Taux USD → HTG</label><input type="number" step="0.01" min="1" name="tauxChange" value="${s.tauxChange}"></div>
       <div class="field"><label>Diviseur volumétrique (po³/lb)</label><input type="number" step="1" min="1" name="diviseurVolumetrique" value="${s.diviseurVolumetrique}"></div>
       <div class="field"><label>Manutention / pièce ($)</label><input type="number" step="0.01" min="0" name="f.manutention" value="${s.frais.manutention}"></div>
@@ -886,8 +931,9 @@ VIEWS.parametres = () => {
     </div>
     <p class="muted small">Les nouveaux tarifs s'appliquent aux colis reçus ensuite ; les factures déjà émises ne changent pas.</p>
     <h3 class="mt">Succursales</h3>
-    <div class="table-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Nom</th><th>Ville</th><th>Téléphone</th><th>Rôle</th></tr></thead><tbody>
-      ${s.succursales.map((b, i) => `<tr><td class="mono">${esc(b.id)}</td><td><input name="b.${i}.nom" value="${esc(b.nom)}"></td><td><input name="b.${i}.ville" value="${esc(b.ville)}"></td><td><input name="b.${i}.telephone" value="${esc(b.telephone || "")}"></td><td>${b.type === "origine" ? "Entrepôt d'origine" : "Destination"}</td></tr>`).join("")}
+    <div class="table-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Nom</th><th>Ville</th><th>Téléphone</th><th>Rôle</th><th>Ouverte</th></tr></thead><tbody>
+      ${s.succursales.map((b, i) => `<tr><td class="mono">${esc(b.id)}</td><td><input name="b.${i}.nom" value="${esc(b.nom)}"></td><td><input name="b.${i}.ville" value="${esc(b.ville)}"></td><td><input name="b.${i}.telephone" value="${esc(b.telephone || "")}"></td><td>${b.type === "origine" ? "Entrepôt d'origine" : "Destination"}</td>
+        <td>${b.type === "origine" ? "" : `<input type="checkbox" name="b.${i}.actif" ${b.actif === false ? "" : "checked"} aria-label="${esc(b.nom)} ouverte" style="width:auto;min-width:0">`}</td></tr>`).join("")}
     </tbody></table></div>
     <h3 class="mt">Points de transit (aéroports, ports, entrepôts)</h3>
     <div class="table-wrap"><table class="tbl"><thead><tr><th>Nom</th><th>Code (IATA / port)</th><th>Ville</th><th>Pays</th><th>Type</th></tr></thead><tbody>
@@ -1026,7 +1072,13 @@ const ACTIONS = {
     closeModal(); toast(el.dataset.canal === "WhatsApp" ? "WhatsApp ouvert" : "Message copié");
   },
 
-  "new-manifeste": () => openModal(manifesteForm({ mode: "air", transporteur: "Amerijet", origine: "FLL", destination: "PAP", dateDepart: dayKey(Date.now() + 86400000) })),
+  "new-manifeste": () => openModal(manifesteForm({ mode: "air", transporteur: S().transporteurs.air, origine: "FLL", destination: "PAP", dateDepart: dayKey(Date.now() + 86400000) }), {
+    // Le transporteur par défaut suit le mode : bateau → transporteur maritime (Solution Cargo)
+    onMount: f => {
+      const mode = f.querySelector("[name=mode]"), tr = f.querySelector("[name=transporteur]");
+      mode.addEventListener("change", () => { if (!tr.value || Object.values(S().transporteurs).includes(tr.value)) tr.value = S().transporteurs[mode.value] || ""; });
+    },
+  }),
   "edit-manifeste": el => openModal(manifesteForm(manifesteOf(el.dataset.id))),
   "manif-remove": (el, e) => {
     e.stopPropagation();
@@ -1065,6 +1117,20 @@ const ACTIONS = {
     const m = manifesteOf(el.dataset.id);
     if (!confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
     store.mutate(() => { m.etapes = itineraireType(m.mode, m.destination, m.dateDepart); syncDatesManifeste(m); });
+  },
+  "man-mode": el => { ui.manifestes.mode = el.dataset.id; render(); },
+  "export-voyages": () => downloadCsv("welj-registre-voyages.csv", [["Date d'envoi", "Parti", "N° voyage", "Mode", "Transporteur", "Vol / navire", "Conteneur", "Référence", "Destination", "Colis", "Pièces", "Poids lb", "Valeur $", "Fret $", "Arrivée Haïti", "Statut"],
+    ...[...db.manifestes].sort((a, b) => String(dateEnvoi(a)).localeCompare(String(dateEnvoi(b)))).map(m => { const b = bilanOf(m); return [dayKey(dateEnvoi(m)), m.bilan ? "oui" : "non", m.numero, m.mode === "mer" ? "Bateau" : "Avion", m.transporteur, m.mode === "mer" ? m.navire : m.vol, m.conteneur, m.reference,
+      branch(m.destination)?.nom || m.destination, b.colis, b.pieces, b.poids, b.valeur, b.fret, dayKey(m.eta), statutManifeste(m.statut).label]; })]),
+  "print-voyages": () => {
+    const f = ui.manifestes;
+    const list = db.manifestes.filter(m => (!f.mode || m.mode === f.mode) && (!f.mois || monthKey(dateEnvoi(m)) === f.mois)).sort((a, b) => String(dateEnvoi(a)).localeCompare(String(dateEnvoi(b))));
+    const B = list.map(bilanOf); const tot = k => B.reduce((s, b) => s + b[k], 0);
+    printHtml(`${docHeader()}<h2>Registre des voyages${f.mois ? " — " + new Date(f.mois + "-15T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" }) : ""}${f.mode ? (f.mode === "mer" ? " — bateau" : " — avion") : ""}</h2>
+      <table class="doc-table"><thead><tr><th>Date d'envoi</th><th>N°</th><th>Mode</th><th>Transporteur / vol / navire</th><th>Destination</th><th class="r">Colis</th><th class="r">Pièces</th><th class="r">Poids (lb)</th><th class="r">Fret ($)</th></tr></thead><tbody>
+      ${list.map((m, i) => `<tr><td>${fdatetime(dateEnvoi(m))}${m.bilan ? "" : " (prévu)"}</td><td>${esc(m.numero)}</td><td>${m.mode === "mer" ? "Bateau" : "Avion"}</td><td>${esc(m.transporteur)} ${esc(transportInfo(m))}</td><td>${esc(branch(m.destination)?.nom || m.destination)}</td>
+        <td class="r">${B[i].colis}</td><td class="r">${B[i].pieces}</td><td class="r">${num(B[i].poids)}</td><td class="r">${num(B[i].fret, 2)}</td></tr>`).join("")}
+      <tr class="total"><td colspan="5">Total : ${list.length} voyage(s)</td><td class="r">${tot("colis")}</td><td class="r">${tot("pieces")}</td><td class="r">${num(tot("poids"))}</td><td class="r">${num(tot("fret"), 2)}</td></tr></tbody></table>`);
   },
   "ach-mode": el => { ui.acheminement.mode = el.dataset.id; render(); },
   "ach-vue": el => { ui.acheminement.vue = el.dataset.id; render(); },
@@ -1119,16 +1185,16 @@ function manifesteForm(m) {
     <h2>${m.id ? "Modifier le manifeste" : "Nouveau manifeste"}</h2>
     <div class="form-grid">
       <div class="field"><label>Mode</label><select name="mode" ${m.id ? "disabled" : ""}>${opt("air", "Aérien (AWB)", m.mode === "air")}${opt("mer", "Maritime (conteneur / BL)", m.mode === "mer")}</select></div>
-      <div class="field"><label>Transporteur</label><input name="transporteur" value="${esc(m.transporteur || "")}" list="carriers"><datalist id="carriers">${["Amerijet", "Sunrise Airways", "Crowley", "Seaboard Marine", "Tropical Shipping", "DHL"].map(x => `<option value="${x}">`).join("")}</datalist></div>
+      <div class="field"><label>Transporteur</label><input name="transporteur" value="${esc(m.transporteur || "")}" list="carriers"><datalist id="carriers">${[...new Set([S().transporteurs.mer, S().transporteurs.air, ...db.manifestes.map(x => x.transporteur)])].filter(Boolean).map(x => `<option value="${esc(x)}">`).join("")}</datalist></div>
     </div>
     <div class="form-grid">
       <div class="field"><label>Référence (AWB / BL / n° conteneur)</label><input name="reference" value="${esc(m.reference || "")}"></div>
-      <div class="field"><label>Destination</label><select name="destination">${S().succursales.filter(b => b.type === "destination").map(b => opt(b.id, b.nom, b.id === m.destination)).join("")}</select></div>
+      <div class="field"><label>Destination</label><select name="destination">${destOptions(m.destination)}</select></div>
     </div>
     <div class="form-grid g3">
       <div class="field"><label>N° de vol (aérien)</label><input name="vol" value="${esc(m.vol || "")}" placeholder="M6 1403"></div>
-      <div class="field"><label>Navire / voyage (maritime)</label><input name="navire" value="${esc(m.navire || "")}" placeholder="Crowley Tiscortes — V.2536S"></div>
-      <div class="field"><label>N° conteneur (maritime)</label><input name="conteneur" value="${esc(m.conteneur || "")}" placeholder="CMCU 481220-7"></div>
+      <div class="field"><label>Navire / voyage (maritime)</label><input name="navire" value="${esc(m.navire || "")}" placeholder="Voyage SC-2536"></div>
+      <div class="field"><label>N° conteneur (maritime)</label><input name="conteneur" value="${esc(m.conteneur || "")}" placeholder="481220-7"></div>
     </div>
     ${m.id ? `<p class="muted small">Les dates et points de transit se modifient dans l'itinéraire du manifeste.</p>` : `
     <div class="field"><label>Date de départ prévue (vol / appareillage)</label><input type="date" name="dateDepart" required value="${esc(m.dateDepart ? dayKey(m.dateDepart) : "")}"></div>
@@ -1141,7 +1207,7 @@ function pointsOptions(selected) {
   const grp = (label, list) => list.length ? `<optgroup label="${esc(label)}">${list.map(p => opt(p.id, `${p.nom}${p.code ? " (" + p.code + ")" : ""}`, p.id === selected)).join("")}</optgroup>` : "";
   const pts = S().pointsTransit;
   return grp("États-Unis", pts.filter(p => p.pays === "USA")) + grp("Haïti", pts.filter(p => p.pays === "Haïti"))
-    + grp("Autres pays (escales)", pts.filter(p => p.pays !== "USA" && p.pays !== "Haïti"))
+    + grp("République dominicaine & autres escales", pts.filter(p => p.pays !== "USA" && p.pays !== "Haïti"))
     + grp("Succursales WELJ", S().succursales.map(b => pointOf(b.id)));
 }
 function etapeForm(m, e) {
@@ -1311,6 +1377,7 @@ const FORMS = {
     const p = pointOf(e.pointId); const a = actionEtape(e.action);
     store.mutate(() => {
       e.reel = reel; e.note = d.note;
+      if (e.action === "depart") enregistrerVoyage(m, db.colis, reel);
       const note = `${a.label} — ${p.nom}${p.code ? " (" + p.code + ")" : ""}${d.note ? " · " + d.note : ""}`;
       const lieu = [p.nom, p.ville].filter(Boolean).join(", ");
       const avances = a.statut ? setManifesteStatut(m, a.statut, { note, lieu, date: reel }) : [];
@@ -1349,6 +1416,7 @@ const FORMS = {
         else if (p === "s") s.services[+a][b] = b === "prix" || b === "minimum" ? +v || 0 : v;
         else if (p === "b") s.succursales[+a][b] = v;
         else if (p === "pt") s.pointsTransit[+a][b] = v;
+        else if (p === "t") s.transporteurs[a] = v;
         else if (k === "tauxChange" || k === "diviseurVolumetrique") s[k] = +v || s[k];
       }
       log("Paramètres", "Paramètres mis à jour");

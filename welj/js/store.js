@@ -20,7 +20,7 @@ export function load() {
     db = raw ? JSON.parse(raw) : null;
   } catch { db = null; }
   if (!db || !db.version) { db = seedData(); save(); }
-  else if (db.version < 2) { migrate(db); save(); }
+  else if (db.version < 7) { migrate(db); save(); }
   return db;
 }
 

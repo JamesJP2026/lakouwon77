@@ -3,7 +3,8 @@
 Application de gestion de la chaîne logistique **Miami → Haïti** pour
 **WELJ Express Services** (welj-ht.com) : réception à l'entrepôt de
 Fort Lauderdale, consolidation en manifestes, suivi, dédouanement,
-remise en succursale (Delmas 95, Jérémie, Cap-Haïtien), caisse
+remise en succursale (Delmas 95, Route Frères / Technozi, Tabarre,
+Cap-Haïtien, Jérémie, Les Cayes — Gonaïves et Saint-Marc bientôt), caisse
 multi-devises et rapports.
 
 100 % en français, JavaScript vanilla, **aucune étape de build**, comme
@@ -36,7 +37,8 @@ chargées au premier lancement (18 clients, 44 colis à toutes les étapes,
 | **Tableau de bord** | KPIs (entrepôt, en route, à remettre, livrés, encaissé, impayés), pipeline par statut, encaissements hebdomadaires, manifestes actifs, alertes |
 | **Réception entrepôt** | Saisie du colis (client, n° fournisseur, poids, dimensions, valeur, service, destination), **devis instantané** (poids volumétrique, assurance, douane), impression de l'étiquette 4×6 avec code-barres |
 | **Colis** | Recherche (n° WELJ, n° fournisseur, client, contenu), filtres, fiche détaillée : historique, facture, paiements, notifications, changement de statut contrôlé |
-| **Manifestes / Envois** | Création d'un envoi aérien (AWB, n° de vol) ou maritime (BL, navire/voyage, conteneur) avec son **itinéraire type**, ajout d'escales, report des dates, ajout des colis compatibles de l'entrepôt. **Valider une étape** enregistre sa date réelle, fait avancer le manifeste et ajoute le point de transit à l'historique de tous ses colis. Impression du manifeste avec l'itinéraire |
+| **Voyages / Manifestes** — registre des voyages | Chaque voyage (avion ou bateau) avec sa **date d'envoi** et les **quantités chargées** (colis, pièces, poids, valeur, fret), **figées au départ** ; filtres par mois et par mode, totaux, récapitulatif mensuel, export CSV et impression du registre |
+| **Manifeste (fiche)** | Création d'un envoi aérien (AWB, n° de vol) ou maritime (BL, navire/voyage, conteneur) avec son **itinéraire type**, ajout d'escales, report des dates, ajout des colis compatibles de l'entrepôt. **Valider une étape** enregistre sa date réelle, fait avancer le manifeste et ajoute le point de transit à l'historique de tous ses colis. Impression du manifeste avec l'itinéraire |
 | **Retrait & livraison** | Scan du code-barres au comptoir, files « à trier / prêts / en livraison / remis aujourd'hui », affectation d'un livreur, remise avec nom et pièce d'identité (bloquée si solde impayé, sauf admin) |
 | **Clients** | Fiche client avec code `WELJ-0001`, adresse Miami personnalisée, historique des colis, solde, relevé de compte imprimable |
 | **Caisse & paiements** | Encaissement USD / HTG / MonCash / NatCash / carte / virement avec conversion au taux du jour, reçus numérotés, totaux par méthode, soldes à recouvrer |
@@ -57,10 +59,12 @@ Reçu à l'entrepôt → Consolidé (manifeste) → En transit → En dédouanem
 
 | Mode | Étapes (jours par rapport au départ) |
 |---|---|
-| ✈ Aérien | Chargement entrepôt Fort Lauderdale (J-1) → Départ Miami MIA (J0) → Arrivée PAP ou CAP (J0) → Mainlevée douane (J+1) → Succursale (J+2, Jérémie J+3) |
-| ⛴ Maritime | Chargement entrepôt (J-2) → Départ Port Everglades (J0) → Arrivée port de Port-au-Prince ou Cap-Haïtien (J+5) → Mainlevée douane (J+9) → Succursale (J+11, Jérémie J+12) |
+| ✈ Avion | Chargement entrepôt Fort Lauderdale (J-1) → Départ Miami MIA (J0) → Arrivée PAP ou CAP (J0) → Mainlevée douane (J+1) → Succursale de Port-au-Prince ou du Cap (J+2) ; camion depuis Port-au-Prince pour Jérémie, Les Cayes, Gonaïves, Saint-Marc |
+| ⛴ Bateau (**Solution Cargo**) | Chargement entrepôt (J-2) → Départ Port Everglades (J0) → Escale en **République dominicaine**, port de Manzanillo (J+3) → Camion jusqu'à la frontière de **Dajabón** (J+4) → Arrivée en Haïti à **Ouanaminthe** (J+5) → Mainlevée douane à Ouanaminthe (J+6) → **Camion depuis Ouanaminthe** vers la succursale : Cap-Haïtien (J+6,6), Gonaïves, Saint-Marc (sur la route), **Port-au-Prince** — Delmas 95, Route Frères, Tabarre (J+7,5) — puis Jérémie et Les Cayes via Port-au-Prince |
 
-Chaque étape est modifiable (point, date, note) et on peut insérer des
+Les délais (J+…) sont des **estimations** à ajuster. Le port dominicain
+proposé par défaut est Manzanillo (le plus proche de Dajabón) ; Puerto
+Plata est aussi disponible. Chaque étape est modifiable (point, date, note) et on peut insérer des
 escales ou transbordements. Les points de transit fournis (MIA, FLL,
 Port Everglades, PortMiami, Toussaint Louverture, Cap-Haïtien, port de
 Port-au-Prince, Lafito…) se complètent dans Paramètres. Une étape non
@@ -75,6 +79,18 @@ bord, acheminement, manifeste).
 | Agent entrepôt Miami | Réception, colis, manifestes, clients, suivi |
 | Agent comptoir Haïti | Colis, retrait & livraison, clients, caisse, suivi |
 | Livreur | Uniquement ses livraisons |
+
+### Succursales
+
+Delmas 95 (siège), Route Frères (Technozi), Tabarre, Cap-Haïtien, Jérémie,
+Les Cayes. **Gonaïves et Saint-Marc** sont marquées « bientôt » : visibles
+mais non sélectionnables tant que la case *Ouverte* n'est pas cochée dans
+Paramètres → Succursales.
+
+### Couleurs
+
+Bleu roi (couleur principale), rouge, blanc et orange — définis en
+variables CSS en tête de `css/app.css`.
 
 ## Tarification (à adapter)
 

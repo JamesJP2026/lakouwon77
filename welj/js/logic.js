@@ -166,7 +166,7 @@ export const TYPES_POINT = [
   { id: "entrepot", label: "Entrepôt" },
   { id: "aeroport", label: "Aéroport" },
   { id: "port", label: "Port maritime" },
-  { id: "douane", label: "Douane / zone franche" },
+  { id: "douane", label: "Douane / poste frontière" },
   { id: "autre", label: "Autre" },
 ];
 export const typePoint = id => TYPES_POINT.find(t => t.id === id)?.label || id;
@@ -175,6 +175,7 @@ export const ACTIONS_ETAPE = [
   { id: "chargement", label: "Départ entrepôt / chargement", short: "Chargement", statut: "ferme" },
   { id: "depart",     label: "Départ (décollage / appareillage)", short: "Départ", statut: "transit" },
   { id: "escale",     label: "Escale / transbordement", short: "Escale", statut: null },
+  { id: "terrestre",  label: "Transport par camion", short: "Camion", statut: null },
   { id: "arrivee",    label: "Arrivée en Haïti", short: "Arrivée", statut: "douane" },
   { id: "mainlevee",  label: "Mainlevée douane", short: "Mainlevée", statut: null },
   { id: "succursale", label: "Réception en succursale", short: "Succursale", statut: "arrive" },
@@ -189,25 +190,48 @@ export const DEFAULT_POINTS = [
   { id: "PMIA",     nom: "PortMiami", code: "USMIA", ville: "Miami, FL", pays: "USA", type: "port" },
   { id: "PAP-APT",  nom: "Aéroport Toussaint Louverture", code: "PAP", ville: "Port-au-Prince", pays: "Haïti", type: "aeroport" },
   { id: "CAP-APT",  nom: "Aéroport de Cap-Haïtien", code: "CAP", ville: "Cap-Haïtien", pays: "Haïti", type: "aeroport" },
+  { id: "MANZ",     nom: "Port de Manzanillo (Pepillo Salcedo)", code: "DOMAN", ville: "Montecristi", pays: "Rép. dominicaine", type: "port" },
+  { id: "DOPOP",    nom: "Port de Puerto Plata", code: "DOPOP", ville: "Puerto Plata", pays: "Rép. dominicaine", type: "port" },
+  { id: "DAJ",      nom: "Poste frontière de Dajabón", code: "DAJ", ville: "Dajabón", pays: "Rép. dominicaine", type: "douane" },
+  { id: "OUA",      nom: "Poste frontière de Ouanaminthe (douane)", code: "OUA", ville: "Ouanaminthe", pays: "Haïti", type: "douane" },
   { id: "PAP-PORT", nom: "Port de Port-au-Prince (APN)", code: "HTPAP", ville: "Port-au-Prince", pays: "Haïti", type: "port" },
   { id: "LAFITO",   nom: "Port Lafito", code: "HTLAF", ville: "Lafito", pays: "Haïti", type: "port" },
   { id: "CAP-PORT", nom: "Port de Cap-Haïtien", code: "HTCAP", ville: "Cap-Haïtien", pays: "Haïti", type: "port" },
 ];
+
+/* Réseau routier haïtien (délais estimés en jours) :
+   - succursales de la zone de Port-au-Prince : livrées directement ;
+   - Gonaïves et Saint-Marc : sur la route Ouanaminthe → Port-au-Prince (bateau),
+     ou desservies par camion depuis Port-au-Prince (avion) ;
+   - Jérémie et Les Cayes : camion depuis Port-au-Prince.                     */
+export const ZONE_PAP = ["PAP", "RFT", "TAB"];
+const DEPUIS_PAP = { GON: 0.5, STM: 0.4, CAY: 1, JER: 1.5 };
+const DEPUIS_OUA = { CAP: 0.4, GON: 0.8, STM: 1 };
 
 /** Itinéraire type selon le mode et la succursale de destination. Décalages en jours depuis le départ. */
 export function itineraireType(mode, destination, dateDepart) {
   const d0 = new Date(dateDepart || Date.now()).getTime();
   const at = j => new Date(d0 + j * 86400000).toISOString();
   const nord = destination === "CAP";
-  const route = mode === "mer"
-    ? [["WH-FLL", "chargement", -2], ["PEV", "depart", 0], [nord ? "CAP-PORT" : "PAP-PORT", "arrivee", 5], [nord ? "CAP-PORT" : "PAP-PORT", "mainlevee", 9], [destination, "succursale", destination === "JER" ? 12 : 11]]
-    : [["WH-FLL", "chargement", -1], ["MIA", "depart", 0], [nord ? "CAP-APT" : "PAP-APT", "arrivee", 0.2], [nord ? "CAP-APT" : "PAP-APT", "mainlevee", 1], [destination, "succursale", destination === "JER" ? 3 : 2]];
+  // Bateau (Solution Cargo) : Floride → port en République dominicaine → camion jusqu'à la
+  // frontière Dajabón / Ouanaminthe (douane haïtienne) → camion de Ouanaminthe vers la
+  // succursale : Cap-Haïtien, ou Port-au-Prince (Delmas 95, Route Frères / Technozi) et Jérémie via Port-au-Prince.
+  const mer = [["WH-FLL", "chargement", -2], ["PEV", "depart", 0], ["MANZ", "escale", 3], ["DAJ", "terrestre", 4], ["OUA", "arrivee", 5], ["OUA", "mainlevee", 6], ["OUA", "terrestre", 6.2]];
+  if (DEPUIS_OUA[destination]) mer.push([destination, "succursale", 6.2 + DEPUIS_OUA[destination]]);
+  else if (ZONE_PAP.includes(destination)) mer.push([destination, "succursale", 7.5]);
+  else mer.push(["PAP", "terrestre", 7.5], [destination, "succursale", 7.5 + (DEPUIS_PAP[destination] || 1.5)]);
+  const air = [["WH-FLL", "chargement", -1], ["MIA", "depart", 0], [nord ? "CAP-APT" : "PAP-APT", "arrivee", 0.2], [nord ? "CAP-APT" : "PAP-APT", "mainlevee", 1]];
+  if (nord || ZONE_PAP.includes(destination)) air.push([destination, "succursale", 2]);
+  else air.push(["PAP-APT", "terrestre", 1.5], [destination, "succursale", 1.5 + (DEPUIS_PAP[destination] || 1.5)]);
+  const route = mode === "mer" ? mer : air;
   return route.map(([pointId, action, j], i) => ({ id: "e" + i + Math.random().toString(36).slice(2, 7), pointId, action, prevu: at(j), reel: null, note: "" }));
 }
 /** Marque comme réalisées les étapes cohérentes avec un statut de manifeste (données existantes / démo). */
 export function etapesPourStatut(etapes, statutM) {
-  const faits = { ouvert: [], ferme: ["chargement"], transit: ["chargement", "depart"], douane: ["chargement", "depart", "escale", "arrivee"], arrive: ACTIONS_ETAPE.map(a => a.id) }[statutM] || [];
-  etapes.forEach(e => { if (faits.includes(e.action)) e.reel = e.prevu; });
+  // Toutes les étapes jusqu'à l'étape clé du statut (incluse) sont considérées comme réalisées
+  const cle = { ferme: "chargement", transit: "depart", douane: "arrivee" }[statutM];
+  const fin = statutM === "arrive" ? etapes.length - 1 : cle ? etapes.findIndex(e => e.action === cle) : -1;
+  etapes.forEach((e, i) => { if (i <= fin) e.reel = e.prevu; });
   return etapes;
 }
 /** Retard (en jours, > 0) d'une étape non réalisée dont la date prévue est dépassée. */

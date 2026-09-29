@@ -7,6 +7,14 @@
 ========================================================= */
 import { numeroTracking, numeroManifeste, codeClient, numeroRecu, calculerFacture, DEFAULT_POINTS, itineraireType, etapesPourStatut } from "./logic.js";
 
+// Succursales ajoutées au réseau (Gonaïves et Saint-Marc : ouverture prochaine)
+const NOUVELLES_SUCCURSALES = [
+  { id: "TAB", nom: "Succursale Tabarre", ville: "Tabarre", type: "destination", telephone: "" },
+  { id: "CAY", nom: "Succursale Les Cayes", ville: "Les Cayes", type: "destination", telephone: "" },
+  { id: "GON", nom: "Succursale Gonaïves", ville: "Gonaïves", type: "destination", telephone: "", actif: false },
+  { id: "STM", nom: "Succursale Saint-Marc", ville: "Saint-Marc", type: "destination", telephone: "", actif: false },
+];
+
 export function defaultSettings() {
   return {
     entreprise: {
@@ -21,6 +29,8 @@ export function defaultSettings() {
       horaires: "Lun–Ven 8h–16h, Sam 8h–13h",
     },
     tauxChange: 132,
+    // Transporteurs par défaut proposés à la création d'un envoi
+    transporteurs: { air: "Amerijet", mer: "Solution Cargo" },
     diviseurVolumetrique: 166,
     services: [
       { id: "air_express", nom: "Aérien Express", mode: "air", unite: "lb", prix: 4.5, minimum: 15, delai: "2–4 jours" },
@@ -34,6 +44,8 @@ export function defaultSettings() {
       { id: "PAP", nom: "Delmas 95 (siège)", ville: "Port-au-Prince", type: "destination", telephone: "+509 38 34 7343" },
       { id: "JER", nom: "Succursale Jérémie", ville: "Jérémie", type: "destination", telephone: "" },
       { id: "CAP", nom: "Succursale Cap-Haïtien", ville: "Cap-Haïtien", type: "destination", telephone: "" },
+      { id: "RFT", nom: "Route Frères (Technozi)", ville: "Port-au-Prince", type: "destination", telephone: "" },
+      ...NOUVELLES_SUCCURSALES.map(b => ({ ...b })),
     ],
   };
 }
@@ -48,7 +60,7 @@ const USERS = [
 export function seedData({ empty = false } = {}) {
   const settings = defaultSettings();
   const db = {
-    version: 2, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
+    version: 7, settings, users: USERS.map(u => ({ ...u })), currentUserId: "u-admin",
     seq: { client: 0, colis: 0, manifeste: 0, recu: 0 },
     clients: [], colis: [], manifestes: [], paiements: [], notifications: [], journal: [],
   };
@@ -63,7 +75,7 @@ export function seedData({ empty = false } = {}) {
 
   const prenoms = ["Jean", "Marie", "Pierre", "Rose", "Jacques", "Nadège", "Wilner", "Fabienne", "Ricardo", "Guerline", "Stanley", "Mirlande", "Frantz", "Esther", "Kervens", "Judith", "Evens", "Sabine"];
   const noms = ["Joseph", "Pierre-Louis", "Charles", "Jean-Baptiste", "Etienne", "Augustin", "Dorsainvil", "Célestin", "Toussaint", "Désir", "Michel", "Lafortune"];
-  const dests = ["PAP", "PAP", "PAP", "PAP", "JER", "CAP", "CAP"];
+  const dests = ["PAP", "PAP", "TAB", "RFT", "JER", "CAY", "CAP", "CAP"];
   for (let i = 0; i < 18; i++) {
     const seq = ++db.seq.client;
     const entreprise = i % 7 === 3;
@@ -88,10 +100,10 @@ export function seedData({ empty = false } = {}) {
   // Manifestes : arrivé, en douane (maritime), en transit, ouvert, et un maritime en retard vers le Cap
   const manifs = [
     { mode: "air", statut: "arrive", dep: 20, transporteur: "Amerijet", vol: "M6 1403", dest: "PAP" },
-    { mode: "mer", statut: "douane", dep: 8, transporteur: "Crowley", navire: "Crowley Tiscortes — V.2536S", conteneur: "CMCU 481220-7", dest: "PAP" },
+    { mode: "mer", statut: "douane", dep: 5.5, transporteur: "Solution Cargo", navire: "Voyage SC-2536", conteneur: "481220-7", dest: "PAP" },
     { mode: "air", statut: "transit", dep: 0.1, transporteur: "Amerijet", vol: "M6 1411", dest: "PAP" },
     { mode: "air", statut: "ouvert", dep: -3, transporteur: "Amerijet", vol: "M6 1419", dest: "PAP" },
-    { mode: "mer", statut: "transit", dep: 7, transporteur: "Seaboard Marine", navire: "Seaboard Pride — V.118", conteneur: "SMLU 772031-4", dest: "CAP", retard: true },
+    { mode: "mer", statut: "transit", dep: 7, transporteur: "Solution Cargo", navire: "Voyage SC-2541", conteneur: "772031-4", dest: "CAP", retard: true },
   ];
   for (const m of manifs) {
     const seq = ++db.seq.manifeste;
@@ -99,7 +111,9 @@ export function seedData({ empty = false } = {}) {
     const etapes = etapesPourStatut(itineraireType(m.mode, m.dest, depart), m.statut);
     // Écarts réalistes sur les étapes réalisées (quelques heures d'avance / de retard)
     etapes.forEach(e => { if (e.reel) e.reel = new Date(new Date(e.reel).getTime() + (rnd() - .4) * 8 * 3600000).toISOString(); });
-    if (m.retard) etapes.find(e => e.action === "arrivee").note = "Navire retenu au port de Miami (météo)";
+    // Envoi en retard : déchargé en RD et passé à Dajabón, mais bloqué avant Ouanaminthe
+    if (m.retard) etapes.slice(0, etapes.findIndex(e => e.action === "arrivee")).forEach(e => { e.reel = e.reel || e.prevu; });
+    if (m.retard) etapes.find(e => e.action === "arrivee").note = "Camion en attente au passage frontière Dajabón / Ouanaminthe";
     const man = {
       id: "m" + seq, numero: numeroManifeste(seq, m.mode, new Date(depart)), mode: m.mode,
       transporteur: m.transporteur, reference: (m.mode === "mer" ? "BL-" : "AWB 810-") + Math.floor(rnd() * 9e7 + 1e7),
@@ -161,8 +175,26 @@ export function seedData({ empty = false } = {}) {
       });
     }
   });
+  db.manifestes.forEach(m => { const dep = m.etapes.find(e => e.action === "depart"); if (dep?.reel) enregistrerVoyage(m, db.colis, dep.reel); });
   db.journal.push({ id: "j0", date: new Date().toISOString(), user: "u-admin", action: "Initialisation", details: "Données de démonstration chargées" });
   return db;
+}
+
+/** Quantités d'un voyage (figées au départ dans m.bilan pour le registre des voyages). */
+export function bilanManifeste(m, colis) {
+  const cs = colis.filter(c => c.manifesteId === m.id);
+  const parDest = {};
+  cs.forEach(c => { parDest[c.destination] = (parDest[c.destination] || 0) + 1; });
+  const r2 = n => Math.round(n * 100) / 100;
+  return {
+    colis: cs.length, pieces: cs.reduce((s, c) => s + (+c.pieces || 1), 0), poids: r2(cs.reduce((s, c) => s + (+c.poids || 0), 0)),
+    valeur: r2(cs.reduce((s, c) => s + (+c.valeur || 0), 0)), fret: r2(cs.reduce((s, c) => s + (c.facture?.total || 0), 0)), parDest,
+  };
+}
+/** Enregistre le voyage au moment du départ : date d'envoi réelle + quantités chargées. */
+export function enregistrerVoyage(m, colis, dateEnvoi) {
+  m.bilan = { ...bilanManifeste(m, colis), dateEnvoi, enregistreLe: new Date().toISOString() };
+  return m.bilan;
 }
 
 /** Départ et ETA d'un manifeste déduits de son itinéraire (étapes « départ » et « arrivée »). */
@@ -183,6 +215,39 @@ export function migrate(db) {
       if (!m.etapes) { m.etapes = etapesPourStatut(itineraireType(m.mode, m.destination, m.dateDepart), m.statut); syncDatesManifeste(m); }
     }
     db.version = 2;
+  }
+  if (db.version < 3) {
+    // Le transport par bateau est assuré par Solution Cargo
+    db.settings.transporteurs = db.settings.transporteurs || { air: "Amerijet", mer: "Solution Cargo" };
+    for (const m of db.manifestes) {
+      if (m.mode !== "mer" || !["", "Crowley", "Seaboard Marine"].includes(m.transporteur || "")) continue;
+      m.transporteur = "Solution Cargo";
+      if (/^(Crowley|Seaboard)/.test(m.navire || "")) m.navire = "";
+    }
+    db.version = 3;
+  }
+  if (db.version < 4) {
+    // Nouveaux points : ports dominicains et frontière Dajabón / Ouanaminthe
+    for (const p of DEFAULT_POINTS) if (!db.settings.pointsTransit.some(x => x.id === p.id)) db.settings.pointsTransit.push({ ...p });
+    // Les envois maritimes pas encore partis prennent le nouvel itinéraire via la République dominicaine
+    for (const m of db.manifestes) {
+      if (m.mode === "mer" && !(m.etapes || []).some(e => e.reel)) { m.etapes = itineraireType("mer", m.destination, m.dateDepart); syncDatesManifeste(m); }
+    }
+    db.version = 4;
+  }
+  if (db.version < 5) {
+    // Nouvelle destination : Route Frères (Technozi), Port-au-Prince
+    if (!db.settings.succursales.some(b => b.id === "RFT")) db.settings.succursales.push({ id: "RFT", nom: "Route Frères (Technozi)", ville: "Port-au-Prince", type: "destination", telephone: "" });
+    db.version = 5;
+  }
+  if (db.version < 6) {
+    for (const b of NOUVELLES_SUCCURSALES) if (!db.settings.succursales.some(x => x.id === b.id)) db.settings.succursales.push({ ...b });
+    db.version = 6;
+  }
+  if (db.version < 7) {
+    // Registre des voyages : enregistre les envois déjà partis
+    db.manifestes.forEach(m => { const dep = (m.etapes || []).find(e => e.action === "depart"); if (dep?.reel && !m.bilan) enregistrerVoyage(m, db.colis, dep.reel); });
+    db.version = 7;
   }
   return db;
 }
