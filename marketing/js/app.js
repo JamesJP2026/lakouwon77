@@ -42,6 +42,17 @@ function openModal(html, wide = false) {
 }
 const closeModal = () => { $modal.innerHTML = ''; };
 
+// Confirmation affichée dans l'application : window.confirm() est bloqué
+// dans certains contextes (aperçus intégrés, iframes protégées).
+let pendingConfirm = null;
+function askConfirm(msg, onYes, label = 'Confirmer') {
+  openModal(`<h2>Confirmation</h2><p>${esc(msg)}</p>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button>
+    <button type="button" class="btn btn-primary" data-action="confirm-yes">${esc(label)}</button></div>`);
+  pendingConfirm = onYes;
+  $modal.querySelector('[data-action="confirm-yes"]').focus();
+}
+
 function setPath(obj, path, val) {
   const ks = path.split('.');
   let o = obj;
@@ -194,7 +205,7 @@ function modalClient(id) {
         <label class="full">Adresse<input name="adresse" value="${esc(c.adresse)}"></label>
         <label class="full">Site web / réseaux<input name="siteWeb" value="${esc(c.siteWeb)}"></label>
       </div>
-      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button class="btn btn-primary">Enregistrer</button></div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Enregistrer</button></div>
     </form>`, true);
 }
 
@@ -232,7 +243,7 @@ function modalNouveauPlan(clientId = '') {
         <label class="full">Budget publicitaire envisagé (${esc(data.settings.devise)})<input name="budgetPrevu" type="number" min="0" step="any" value="0"></label>
         <label class="full check"><input type="checkbox" name="prefill" checked> Pré-remplir avec des suggestions adaptées au secteur (modifiables)</label>
       </div>
-      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button class="btn btn-primary">Créer le plan</button></div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Créer le plan</button></div>
     </form>`, true);
 }
 
@@ -515,7 +526,7 @@ function modalGenFacture(p) {
         <label>Échéance (jours)<input type="number" name="delai" min="0" value="${num(data.settings.delaiPaiement)}"></label>
       </div>
       ${p.statut === 'brouillon' ? '<p class="hint">Le plan sera marqué comme <b>présenté</b>.</p>' : ''}
-      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button class="btn btn-gold">Créer la facture</button></div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-gold" data-action="submit-form">Créer la facture</button></div>
     </form>`);
 }
 
@@ -641,7 +652,7 @@ function modalPaiement(f) {
         <label>Mode<select name="mode">${['Espèces', 'Virement', 'MonCash', 'NatCash', 'Chèque', 'Carte'].map(m => `<option>${m}</option>`).join('')}</select></label>
         <label>Référence<input name="ref"></label>
       </div>
-      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button class="btn btn-primary">Enregistrer</button></div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Enregistrer</button></div>
     </form>`);
 }
 
@@ -651,7 +662,7 @@ function modalFactureLibre() {
     <form data-form="facture-libre">
       <label>Entreprise cliente<select name="clientId">${data.clients.map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join('')}</select></label>
       <label>Objet<input name="objet" value="Prestations marketing" required></label>
-      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button class="btn btn-primary">Créer</button></div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Créer</button></div>
     </form>`);
 }
 
@@ -725,6 +736,8 @@ document.addEventListener('click', e => {
 
   switch (a) {
     case 'close-modal': closeModal(); break;
+    case 'confirm-yes': { const fn = pendingConfirm; pendingConfirm = null; closeModal(); fn?.(); break; }
+    case 'submit-form': handleForm(el.closest('form[data-form]')); break;
     case 'toggle-menu': document.body.classList.toggle('menu-open'); break;
     case 'print': window.print(); break;
     case 'demo': chargerDemo(); break;
@@ -732,7 +745,7 @@ document.addEventListener('click', e => {
     case 'del-client': {
       const c = clientById(id);
       if (data.plans.some(x => x.clientId === id) || data.factures.some(x => x.clientId === id)) { toast('Cette entreprise a des plans ou factures : supprimez-les d\'abord.', 'err'); break; }
-      if (confirm(`Supprimer « ${c.nom} » ?`)) { data.clients = data.clients.filter(x => x.id !== id); persist(true); render(); }
+      askConfirm(`Supprimer « ${c.nom} » ?`, () => { data.clients = data.clients.filter(x => x.id !== id); persist(true); render(); }, 'Supprimer');
       break;
     }
     case 'new-plan-for': modalNouveauPlan(id); break;
@@ -744,11 +757,11 @@ document.addEventListener('click', e => {
     case 'del-plan': {
       const src = planById(id);
       if (data.factures.some(x => x.planId === id && x.statut !== 'brouillon')) { toast('Ce plan a des factures émises : il ne peut pas être supprimé.', 'err'); break; }
-      if (confirm(`Supprimer le plan « ${src.titre} » ?`)) {
+      askConfirm(`Supprimer le plan « ${src.titre} » ?`, () => {
         data.plans = data.plans.filter(x => x.id !== id);
         data.factures = data.factures.filter(x => x.planId !== id);
         persist(true); render();
-      }
+      }, 'Supprimer');
       break;
     }
     case 'prefill': appliquerSuggestions(p, clientById(p.clientId)?.secteur); persist(); break;
@@ -779,13 +792,13 @@ document.addEventListener('click', e => {
     case 'del-fligne': f.lignes.splice(+el.dataset.i, 1); persist(); rerenderKeepScroll(); break;
     case 'emettre-facture':
       if (!f.lignes.length || totauxFacture(f).total <= 0) { toast('La facture doit avoir un montant supérieur à 0.', 'err'); break; }
-      if (confirm('Émettre la facture ? Elle ne sera plus modifiable.')) { f.statut = 'envoyee'; persist(true); render(); }
+      askConfirm('Émettre la facture ? Elle ne sera plus modifiable.', () => { f.statut = 'envoyee'; persist(true); render(); }, 'Émettre');
       break;
     case 'del-facture':
-      if (confirm('Supprimer ce brouillon de facture ?')) { data.factures = data.factures.filter(x => x.id !== id); persist(true); go('#/factures'); }
+      askConfirm('Supprimer ce brouillon de facture ?', () => { data.factures = data.factures.filter(x => x.id !== id); persist(true); go('#/factures'); }, 'Supprimer');
       break;
     case 'annuler-facture':
-      if (confirm('Annuler cette facture ? Elle restera dans l\'historique avec le statut « Annulée ».')) { f.statut = 'annulee'; persist(true); render(); }
+      askConfirm('Annuler cette facture ? Elle restera dans l\'historique avec le statut « Annulée ».', () => { f.statut = 'annulee'; persist(true); render(); }, 'Annuler la facture');
       break;
     case 'paiement': modalPaiement(f); break;
     case 'del-logo': data.settings.logo = ''; persist(true); render(); break;
@@ -797,17 +810,34 @@ document.addEventListener('click', e => {
       link.click(); URL.revokeObjectURL(link.href); break;
     }
     case 'reset':
-      if (confirm('Effacer TOUTES les données (clients, plans, factures) de ce navigateur ?') && confirm('Confirmer : cette action est irréversible.')) {
-        data = defaultData(); persist(true); go('#/dashboard'); render();
-      }
+      askConfirm('Effacer TOUTES les données (clients, plans, factures) de ce navigateur ?', () =>
+        askConfirm('Confirmer : cette action est irréversible.', () => { data = defaultData(); persist(true); go('#/dashboard'); render(); }, 'Tout effacer'), 'Continuer');
       break;
   }
 });
 
+// Touche Entrée dans un champ : même traitement que le bouton de validation.
 document.addEventListener('submit', e => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
+  handleForm(form);
+});
+
+function formValide(form) {
+  for (const input of form.querySelectorAll('input,select,textarea')) {
+    if (input.required && !String(input.value).trim()) {
+      toast('Veuillez remplir tous les champs obligatoires (*).', 'err'); input.focus(); return false;
+    }
+    if (input.type === 'email' && input.value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.value.trim())) {
+      toast('Adresse email invalide.', 'err'); input.focus(); return false;
+    }
+  }
+  return true;
+}
+
+function handleForm(form) {
+  if (!form || !formValide(form)) return;
   const fd = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
   if (kind === 'client') {
@@ -842,7 +872,7 @@ document.addEventListener('submit', e => {
     s.prochainNumero = (num(s.prochainNumero) || 1) + 1;
     data.factures.push(f); persist(true); closeModal(); go(`#/facture/${f.id}`);
   }
-});
+}
 
 function onInput(e) {
   const el = e.target;
@@ -881,17 +911,23 @@ document.addEventListener('change', e => {
       try {
         const d = JSON.parse(r.result);
         if (!Array.isArray(d.plans) || !Array.isArray(d.clients)) throw new Error();
-        if (!confirm('Remplacer les données actuelles par cette sauvegarde ?')) return;
-        const base = defaultData();
-        data = { ...base, ...d, settings: { ...base.settings, ...d.settings }, factures: d.factures || [] };
-        persist(true); render(); toast('Sauvegarde importée.');
+        askConfirm('Remplacer les données actuelles par cette sauvegarde ?', () => {
+          const base = defaultData();
+          data = { ...base, ...d, settings: { ...base.settings, ...d.settings }, factures: d.factures || [] };
+          persist(true); render(); toast('Sauvegarde importée.');
+        }, 'Remplacer');
       } catch { toast('Fichier de sauvegarde invalide.', 'err'); }
     };
     r.readAsText(el.files[0]);
   }
 });
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $modal.innerHTML) closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $modal.innerHTML) closeModal();
+  // Entrée dans un champ de formulaire : on valide nous-mêmes (l'envoi natif peut être bloqué).
+  const form = e.target.closest?.('form[data-form]');
+  if (e.key === 'Enter' && form && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); handleForm(form); }
+});
 window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
 
 // ---------- Exemple ----------
