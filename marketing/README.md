@@ -41,6 +41,38 @@ de bord crée un client et un plan complet pour découvrir l'application.
    Brouillon modifiable (lignes, remise, taxe, dates) → émise → paiements
    (espèces, virement, MonCash, NatCash…) → payée. Impression / PDF.
 
+## Fiche entreprise : adapter le plan au client
+
+Chaque entreprise cliente a une **fiche** (bouton « Fiche » dans la liste),
+ouverte automatiquement après sa création :
+
+1. **Vérifier sur internet** : boutons de recherche de l'entreprise sur
+   Google, Google Maps (avis), Facebook, Instagram, TikTok et actualités,
+   et une case pour noter ce qui a été trouvé.
+2. **Activité** : description, produits, prix, ancienneté, employés, zone,
+   chiffre d'affaires, saisonnalité.
+3. **Clientèle** : profil, comment les clients découvrent l'entreprise,
+   clients par mois, part de clients fidèles.
+4. **Concurrence et difficultés** : concurrents, atout distinctif, problèmes.
+5. **Présence en ligne et données accumulées** : lien et chiffres par
+   plateforme (abonnés, publications, interactions, note et avis Google,
+   visites du site, contacts WhatsApp), contacts clients et emails
+   collectés, avis marquants, campagnes qui ont marché.
+6. **Moyens** : budget mensuel, qui gère la communication, supports
+   existants (logo, photos, vidéos…).
+
+Un **diagnostic automatique** en tire forces, faiblesses et opportunités
+(taux d'engagement, régularité des publications, réputation Google, base de
+contacts inexploitée, absence de fiche Google ou de site…), avec l'action
+et l'objectif à proposer. À la création d'un plan, la fiche est reprise
+automatiquement ; dans un plan existant, le bouton « Importer la fiche »
+ajoute les nouvelles informations sans rien effacer ni dupliquer. La
+présentation affiche la présence en ligne actuelle du client.
+
+L'application fonctionnant sans serveur, elle ne lit pas elle-même les
+réseaux sociaux (ils bloquent ce type d'accès) : les chiffres sont
+recopiés depuis les pages ouvertes par les boutons de recherche.
+
 ## Obtenir plus de résultats
 
 - **Score de qualité du plan** (0-100 %), affiché dans l'éditeur et la liste
@@ -78,6 +110,7 @@ styles.css        styles écran + impression
 js/app.js         vues, éditeur, présentation, factures, routeur
 js/store.js       stockage local, formatage, calcul des totaux
 js/analyse.js     score du plan, résultats, recommandations
+js/fiche.js       fiche entreprise, présence en ligne, diagnostic
 js/secteurs.js    suggestions par secteur d'activité et liste des canaux
 ```
 

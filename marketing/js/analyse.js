@@ -1,6 +1,7 @@
 // Analyse d'un plan : score de qualité, conseils pour l'améliorer, et
 // calcul des résultats réels (dépenses, prospects, ventes, ROI).
 import { num, todayISO } from './store.js';
+import { completude } from './fiche.js';
 
 const rempli = s => String(s ?? '').trim().length > 0;
 const chiffre = s => /\d/.test(String(s ?? ''));
@@ -21,11 +22,12 @@ export function normaliserPlan(p) {
 export const actionEnRetard = (a, p) => a.statut !== 'termine' && (a.fin || p.fin) && (a.fin || p.fin) < todayISO();
 
 // Score de 0 à 100 + liste de conseils. Chaque conseil pointe vers l'étape à corriger.
-export function scorePlan(p) {
+export function scorePlan(p, client) {
   const checks = [];
   const add = (ok, texte, step, poids = 1) => checks.push({ ok, texte, step, poids });
   const budget = p.actions.reduce((s, a) => s + num(a.budget), 0);
 
+  if (client?.fiche) add(completude(client) >= 50, 'Complétez la fiche entreprise (activité, clientèle, présence en ligne) pour mieux adapter le plan.', 'fiche', 2);
   add(rempli(p.motif) && (p.motif !== 'autre' || rempli(p.motifDetail)), 'Indiquez le motif du plan : pourquoi l\'entreprise a besoin de ce plan.', 'infos', 2);
   add(rempli(p.resume), 'Rédigez un résumé : c\'est la première chose que lira le client.', 'infos');
   add(rempli(p.contexte), 'Décrivez la situation actuelle de l\'entreprise.', 'analyse');

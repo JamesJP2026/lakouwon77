@@ -212,6 +212,22 @@ blockquote .slogan{font-family:'Manrope'; font-size:19px; font-weight:800; color
 .motif-box b{color:var(--navy);}
 .motif-box p{margin:6px 0 0;}
 
+/* Fiche entreprise */
+.fiche-layout{display:grid; grid-template-columns:1fr 340px; gap:16px; align-items:start;}
+.fiche-side{position:sticky; top:16px;}
+.fiche-side .panel{margin-bottom:12px;}
+.check-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:0 12px;}
+.lbl-like{font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:4px;}
+input[data-cbind$=".url"]{min-width:190px;}
+.mini-lbl{display:block; font-size:10.5px; color:var(--ink-soft); margin-bottom:2px; white-space:nowrap;}
+.mt{margin-top:12px;}
+.strong-link{font-weight:700; color:var(--ink); text-decoration:none;}
+.strong-link:hover{text-decoration:underline;}
+.fiche-link{text-decoration:none;}
+.fiche-hint{background:var(--blue-bg);}
+.side-plan{display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px;}
+.intro-fiche p{margin:8px 0 0;}
+
 /* Filtres */
 .filters{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
 .filters input{flex:1; min-width:200px;}
@@ -267,6 +283,7 @@ tr.late td{background:#fdf5f4;}
   .grid-2,.editor{grid-template-columns:1fr;}
   .steps{position:static; flex-direction:row; overflow-x:auto;}
   .editor-side{position:static;} .steps-sep{display:none;}
+  .fiche-layout{grid-template-columns:1fr;} .fiche-side{position:static;}
   .res-grid{grid-template-columns:1fr 1fr;}
   .step{white-space:nowrap;}
   .sidebar{position:fixed; left:-250px; transition:left .2s;}

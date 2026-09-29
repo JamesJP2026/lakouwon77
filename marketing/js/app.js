@@ -3,10 +3,12 @@ import {
   dateFr, dateCourte, totauxFacture, budgetActions, totalHonoraires,
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
+import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche } from './fiche.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
 let data = load();
 data.plans.forEach(normaliserPlan);
+data.clients.forEach(normaliserFiche);
 // Filtres des listes (conservés pendant la session).
 const filtres = { plans: { q: '', statut: '' }, factures: { q: '', statut: '' }, actions: { q: '', statut: 'ouvertes', plan: '' } };
 const contient = (txt, q) => !q || String(txt).toLowerCase().includes(q.toLowerCase());
@@ -89,8 +91,12 @@ function nouveauPlan({ clientId, titre, motif = '', motifDetail = '', debut, fin
     ],
     notes: '',
   };
-  if (prefill && client) appliquerSuggestions(p, client.secteur, false);
-  return normaliserPlan(p);
+  normaliserPlan(p);
+  if (prefill && client) {
+    appliquerSuggestions(p, client.secteur, false);
+    if (completude(client) > 0) appliquerFiche(p, client, dureeMois(p));
+  }
+  return p;
 }
 
 // Remplit les champs vides avec les suggestions du secteur (n'écrase rien).
@@ -190,11 +196,13 @@ function viewClients() {
   const rows = data.clients.map(c => {
     const nbPlans = data.plans.filter(p => p.clientId === c.id).length;
     return `<tr>
-      <td><b>${esc(c.nom)}</b><div class="muted">${esc(c.contact || '')}</div></td>
+      <td><a class="strong-link" href="#/client/${c.id}">${esc(c.nom)}</a><div class="muted">${esc(c.contact || '')}</div></td>
       <td>${esc(secteurLabel(c.secteur))}</td>
+      <td><a href="#/client/${c.id}" class="fiche-link">${scoreBadge(completude(c))}</a></td>
       <td>${esc(c.telephone || '')}<div class="muted">${esc(c.email || '')}</div></td>
       <td class="c">${nbPlans}</td>
       <td class="r nowrap">
+        <a class="btn btn-sm btn-gold" href="#/client/${c.id}">Fiche</a>
         <button class="btn btn-sm" data-action="new-plan-for" data-id="${c.id}">+ Plan</button>
         <button class="btn btn-sm" data-action="edit-client" data-id="${c.id}">Modifier</button>
         <button class="btn btn-sm btn-danger" data-action="del-client" data-id="${c.id}">Supprimer</button>
@@ -203,7 +211,7 @@ function viewClients() {
   return topbar('Entreprises clientes', 'Tout type d\'entreprise : commerce, restaurant, services, santé, ONG…',
     `<button class="btn btn-primary" data-action="edit-client">+ Nouvelle entreprise</button>`) +
     (data.clients.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>Entreprise</th><th>Secteur</th><th>Contact</th><th class="c">Plans</th><th></th></tr></thead>
+      <thead><tr><th>Entreprise</th><th>Secteur</th><th title="Fiche entreprise complétée">Fiche</th><th>Contact</th><th class="c">Plans</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>` : '<div class="panel muted">Aucune entreprise cliente. Ajoutez-en une pour créer son premier plan.</div>');
 }
 
@@ -232,6 +240,108 @@ const barreFiltres = (liste, statuts, extra = '') => `<div class="filters no-pri
 
 const scoreBadge = n => `<span class="score ${n >= 80 ? 'good' : n >= 50 ? 'mid' : 'low'}" title="Qualité du plan">${n} %</span>`;
 
+// ---------- Fiche entreprise ----------
+const TYPES_CONSTAT = { force: ['Force', 'ok'], faiblesse: ['Faiblesse', 'err'], opportunite: ['Opportunité', 'info'] };
+
+function diagHtml(c) {
+  const d = diagnostic(c);
+  if (!d.length) return '<p class="muted">Remplissez la fiche et la présence en ligne : le diagnostic apparaîtra ici.</p>';
+  return `<ul class="recos">${d.map(x => `<li class="${TYPES_CONSTAT[x.type][1]}"><b>${TYPES_CONSTAT[x.type][0]} :</b> ${esc(x.texte)}${x.action ? `<div class="muted">→ Action proposée : ${esc(x.action.action)}</div>` : ''}</li>`).join('')}</ul>`;
+}
+
+function updateLiveFiche(c) {
+  const set = (k, html) => document.querySelectorAll(`[data-live="${k}"]`).forEach(el => { el.innerHTML = html; });
+  const pct = completude(c);
+  set('ficheScore', scoreBadge(pct));
+  set('ficheMeter', `<i style="width:${pct}%" class="${pct >= 80 ? '' : pct >= 50 ? 'mid' : 'over'}"></i>`);
+  set('diag', diagHtml(c));
+}
+
+function viewFiche(c) {
+  const f = c.fiche;
+  const cb = (path, val, attrs = '') => `<input data-cbind="${path}" value="${esc(val)}" ${attrs}>`;
+  const cn = (path, val, attrs = '') => `<input data-cbind="${path}" data-type="num" type="number" min="0" step="any" value="${esc(val)}" ${attrs}>`;
+  const ca = (path, val, ph = '', rows = 3) => `<textarea data-cbind="${path}" rows="${rows}" placeholder="${esc(ph)}">${esc(val)}</textarea>`;
+  const q = (label, html, cls = '') => `<label class="${cls}">${label}${html}</label>`;
+  const pct = completude(c);
+  const plans = data.plans.filter(p => p.clientId === c.id);
+  return topbar(`Fiche entreprise — ${esc(c.nom)}`, `${esc(secteurLabel(c.secteur))}${f.majLe ? ` · mise à jour le ${dateCourte(f.majLe)}` : ''}`,
+    `<a class="btn" href="#/clients">← Entreprises</a><button class="btn" data-action="edit-client" data-id="${c.id}">Coordonnées</button><button class="btn btn-primary" data-action="new-plan-for" data-id="${c.id}">+ Nouveau plan</button>`) + `
+  <div class="fiche-layout">
+    <div>
+      <div class="panel intro-fiche">
+        <div class="score-head"><span>Fiche complétée</span><span data-live="ficheScore">${scoreBadge(pct)}</span></div>
+        <div class="meter" data-live="ficheMeter"><i style="width:${pct}%" class="${pct >= 80 ? '' : pct >= 50 ? 'mid' : 'over'}"></i></div>
+        <p class="muted">Plus la fiche est complète, plus le plan sera adapté : les réponses et les chiffres en ligne sont repris automatiquement dans le contexte, le SWOT, les cibles, les actions et les objectifs du plan. Tout est enregistré automatiquement.</p>
+      </div>
+
+      <div class="panel"><h3>1. Vérifier ce qui existe sur internet</h3>
+        <p class="muted">Ouvrez ces recherches pour voir ce que les clients trouvent déjà sur l'entreprise (pages, avis, photos, articles), puis notez les chiffres dans la partie « Présence en ligne » ci-dessous.</p>
+        <div class="row-btns">${liensRecherche(c).map(([l, u]) => `<a class="btn btn-sm" href="${esc(u)}" target="_blank" rel="noopener">🔎 ${l}</a>`).join('')}</div>
+        ${q('Ce que vous avez trouvé en ligne', ca('fiche.recherche', f.recherche, 'Ex. : page Facebook active depuis 2019, beaucoup de commentaires sur la rapidité du service, 2 avis négatifs sur l\'attente, article dans Le Nouvelliste en 2023…', 3), 'mt')}
+      </div>
+
+      <div class="panel"><h3>2. L'activité</h3><div class="form-grid">
+        ${q('Description de l\'activité', ca('fiche.activite.description', f.activite.description, 'Que fait l\'entreprise ? Depuis où ? Pour qui ?'), 'full')}
+        ${q('Produits / services principaux', ca('fiche.activite.produits', f.activite.produits, 'Les 3 à 5 produits ou services qui rapportent le plus', 2), 'full')}
+        ${q('Gamme de prix', cb('fiche.activite.prix', f.activite.prix, 'placeholder="Ex. : de 250 à 1 500 HTG"'))}
+        ${q('Ancienneté', cb('fiche.activite.anciennete', f.activite.anciennete, 'placeholder="Ex. : 5 ans"'))}
+        ${q('Nombre d\'employés', cb('fiche.activite.employes', f.activite.employes))}
+        ${q('Zone servie', cb('fiche.activite.zone', f.activite.zone, 'placeholder="Quartier, ville, tout le pays, diaspora…"'))}
+        ${q('Chiffre d\'affaires mensuel approximatif (facultatif)', cb('fiche.activite.ca', f.activite.ca))}
+        ${q('Saisonnalité', cb('fiche.activite.saisonnalite', f.activite.saisonnalite, 'placeholder="Meilleurs mois, mois creux…"'))}
+      </div></div>
+
+      <div class="panel"><h3>3. La clientèle</h3><div class="form-grid">
+        ${q('Profil des clients actuels', ca('fiche.clientele.profil', f.clientele.profil, 'Âge, sexe, quartier, revenus, profession, particuliers ou entreprises…', 2), 'full')}
+        <div class="full"><div class="lbl-like">Comment les clients découvrent l'entreprise</div><div class="check-grid">
+          ${DECOUVERTE.map(d => `<label class="check"><input type="checkbox" data-cbind="fiche.clientele.decouverte" data-list="${esc(d)}" ${f.clientele.decouverte.includes(d) ? 'checked' : ''}> ${esc(d)}</label>`).join('')}</div></div>
+        ${q('Nombre de clients par mois (environ)', cn('fiche.clientele.clientsMois', f.clientele.clientsMois))}
+        ${q('Part de clients qui reviennent (%)', cn('fiche.clientele.fideles', f.clientele.fideles, 'max="100"'))}
+      </div></div>
+
+      <div class="panel"><h3>4. Concurrence et difficultés</h3><div class="form-grid">
+        ${q('Principaux concurrents', ca('fiche.concurrence.concurrents', f.concurrence.concurrents, 'Noms, prix, points forts de chacun', 2), 'full')}
+        ${q('Ce qui différencie l\'entreprise (son atout)', ca('fiche.concurrence.avantage', f.concurrence.avantage, 'Pourquoi les clients la choisissent plutôt qu\'un concurrent', 2), 'full')}
+        ${q('Problèmes actuels (un par ligne)', ca('fiche.concurrence.problemes', f.concurrence.problemes, 'Ex. : ventes en baisse le soir\nPeu de nouveaux clients', 3), 'full')}
+      </div></div>
+
+      <div class="panel"><h3>5. Présence en ligne et données accumulées</h3>
+        <p class="muted">Recopiez les chiffres visibles sur chaque page (ou dans les statistiques de l'entreprise). Laissez vide si l'entreprise n'y est pas.</p>
+        <div class="table-wrap flat"><table class="edit">
+          <thead><tr><th>Plateforme</th><th>Lien</th><th colspan="3">Chiffres</th></tr></thead>
+          <tbody>${PLATEFORMES.map(pl => `<tr><td><b>${pl.label}</b></td>
+            <td>${cb(`fiche.enLigne.${pl.k}.url`, f.enLigne[pl.k].url, 'placeholder="https://…"')}</td>
+            ${pl.champs.map(ch => `<td><span class="mini-lbl">${CHAMPS_LABELS[ch]}</span>${cn(`fiche.enLigne.${pl.k}.${ch}`, f.enLigne[pl.k][ch], ch === 'note' ? 'max="5" step="0.1"' : '')}</td>`).join('')}
+            ${'<td></td>'.repeat(3 - pl.champs.length)}</tr>`).join('')}</tbody>
+        </table></div>
+        <div class="form-grid mt">
+          ${q('Contacts clients enregistrés (fichier, carnet, caisse…)', cn('fiche.bases.contactsClients', f.bases.contactsClients))}
+          ${q('Adresses email collectées', cn('fiche.bases.emails', f.bases.emails))}
+          ${q('Ce que disent les clients (avis, commentaires marquants)', ca('fiche.bases.avisClients', f.bases.avisClients, '', 2), 'full')}
+          ${q('Publications ou campagnes qui ont le mieux marché', ca('fiche.bases.meilleuresPubs', f.bases.meilleuresPubs, '', 2), 'full')}
+        </div>
+      </div>
+
+      <div class="panel"><h3>6. Moyens disponibles</h3><div class="form-grid">
+        ${q(`Budget marketing possible par mois (${esc(data.settings.devise)})`, cn('fiche.moyens.budgetMensuel', f.moyens.budgetMensuel))}
+        ${q('Qui gère la communication aujourd\'hui ?', cb('fiche.moyens.gestionnaire', f.moyens.gestionnaire, 'placeholder="Le patron, un employé, personne…"'))}
+        <div class="full"><div class="lbl-like">Supports déjà disponibles</div><div class="check-grid">
+          ${Object.entries(SUPPORTS).map(([k, l]) => `<label class="check"><input type="checkbox" data-cbind="fiche.moyens.supports.${k}" data-type="bool" ${f.moyens.supports[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
+      </div></div>
+    </div>
+
+    <aside class="fiche-side">
+      <div class="panel"><h3>Diagnostic automatique</h3><div data-live="diag">${diagHtml(c)}</div></div>
+      <div class="panel"><h3>Plans de cette entreprise</h3>
+        ${plans.length ? plans.map(p => `<div class="side-plan"><a href="#/plan/${p.id}/analyse">${esc(p.titre)}</a> ${badge(p.statut, STATUTS_PLAN)}</div>`).join('')
+          + '<p class="muted">Dans un plan existant, étape « Analyse & SWOT » → « Importer la fiche » pour reprendre les nouvelles informations.</p>'
+          : '<p class="muted">Aucun plan. Les informations de cette fiche seront reprises automatiquement à la création du plan.</p>'}
+      </div>
+    </aside>
+  </div>`;
+}
+
 function viewPlans() {
   const f = filtres.plans;
   const plans = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || ''))
@@ -246,7 +356,7 @@ function viewPlans() {
         <td class="nowrap">${dateCourte(p.debut)} → ${dateCourte(p.fin)}</td>
         <td class="r num">${money(budgetActions(p))}</td>
         <td class="r num">${money(totalHonoraires(p))}</td>
-        <td class="c">${scoreBadge(scorePlan(p).score)}</td>
+        <td class="c">${scoreBadge(scorePlan(p, clientById(p.clientId)).score)}</td>
         <td>${badge(p.statut, STATUTS_PLAN)}</td>
         <td class="r nowrap">
           <a class="btn btn-sm" href="#/plan/${p.id}/infos">Modifier</a>
@@ -354,8 +464,10 @@ function stepContent(p, step) {
         ${field('Résumé du plan (synthèse pour le client)', area('resume', p.resume, 'En quelques phrases : la situation, l\'ambition, la stratégie proposée et les résultats attendus.', 5), 'full')}
       </div>
       <div class="hint">Secteur : <b>${esc(secteurLabel(client?.secteur))}</b>.
-        <button class="btn btn-sm" data-action="prefill">✦ Remplir les champs vides avec des suggestions du secteur</button></div>`;
+        <button class="btn btn-sm" data-action="prefill">✦ Remplir les champs vides avec des suggestions du secteur</button></div>
+      ${ficheHint(client)}`;
     case 'analyse': return `
+      ${ficheHint(client)}
       <div class="form-grid">
         ${field('Situation actuelle de l\'entreprise', area('contexte', p.contexte, 'Historique, produits/services, clients actuels, chiffre d\'affaires, présence en ligne, ce qui marche et ce qui ne marche pas…', 5), 'full')}
         ${field('Marché et concurrence', area('concurrents', p.concurrents, 'Principaux concurrents, leurs prix, leurs points forts, tendances du marché…', 4), 'full')}
@@ -490,11 +602,20 @@ function resultatsKpi(p) {
 const recosHtml = p => `<ul class="recos">${recommandations(p, money).map(r => `<li class="${r.type}">${esc(r.texte)}</li>`).join('')}</ul>`;
 
 function scorePanel(p) {
-  const { score, conseils } = scorePlan(p);
+  const { score, conseils } = scorePlan(p, clientById(p.clientId));
   return `<div class="score-head"><span>Qualité du plan</span>${scoreBadge(score)}</div>
     <div class="meter"><i style="width:${score}%" class="${score >= 80 ? '' : score >= 50 ? 'mid' : 'over'}"></i></div>
-    ${conseils.length ? `<ul class="conseils">${conseils.slice(0, 5).map(c => `<li><a href="#/plan/${p.id}/${c.step}">${esc(c.texte)}</a></li>`).join('')}</ul>
+    ${conseils.length ? `<ul class="conseils">${conseils.slice(0, 5).map(c => `<li><a href="${c.step === 'fiche' ? `#/client/${p.clientId}` : `#/plan/${p.id}/${c.step}`}">${esc(c.texte)}</a></li>`).join('')}</ul>
       ${conseils.length > 5 ? `<div class="muted">+ ${conseils.length - 5} autre(s) conseil(s)</div>` : ''}` : '<p class="muted">Plan complet 👍 Prêt à être présenté.</p>'}`;
+}
+
+function ficheHint(c) {
+  if (!c) return '';
+  const pct = completude(c);
+  return `<div class="hint fiche-hint">Fiche entreprise complétée à ${scoreBadge(pct)}
+    <a class="btn btn-sm" href="#/client/${c.id}">${pct < 100 ? 'Compléter la fiche' : 'Voir la fiche'}</a>
+    ${pct ? '<button class="btn btn-sm btn-primary" data-action="importer-fiche">⇩ Importer la fiche et le diagnostic dans ce plan</button>' : ''}
+    <span class="muted">Contexte, constats SWOT, cibles, actions et objectifs sont ajoutés sans effacer votre travail.</span></div>`;
 }
 
 function ecartBudget(p) {
@@ -539,6 +660,9 @@ function updateLive(p) {
   set('score', scorePanel(p));
   if (document.querySelector('[data-live="resKpi"]')) { set('resKpi', resultatsKpi(p)); set('resRecos', recosHtml(p)); }
 }
+
+// Durée réelle de la campagne en mois (au moins 1).
+const dureeMois = p => Math.max(1, Math.round((new Date(p.fin) - new Date(p.debut)) / 86400000 / 30.44));
 
 // ---------- Présentation ----------
 function moisEntre(debut, fin) {
@@ -599,7 +723,7 @@ function viewPresentation(p) {
     ${section(++n, 'Raison du plan et résumé', `${p.motif || p.motifDetail ? `<div class="motif-box"><b>${esc(p.motif === 'autre' ? 'Raison du plan' : motifLabel(p) || 'Raison du plan')}</b>${p.motifDetail ? `<p>${nl2br(p.motifDetail)}</p>` : ''}</div>` : ''}
       ${p.resume ? `<p class="lead">${nl2br(p.resume)}</p>` : p.motif ? '' : '<p class="muted">—</p>'}`)}
 
-    ${section(++n, 'Analyse de la situation', para('Situation actuelle', p.contexte) + para('Marché et concurrence', p.concurrents) + `
+    ${section(++n, 'Analyse de la situation', para('Situation actuelle', p.contexte) + para('Marché et concurrence', p.concurrents) + presenceEnLigne(c) + `
       <div class="swot">
         <div class="sw-f"><h4>Forces</h4>${liste(p.swot.forces)}</div>
         <div class="sw-w"><h4>Faiblesses</h4>${liste(p.swot.faiblesses)}</div>
@@ -645,6 +769,25 @@ function viewPresentation(p) {
 
     <footer class="doc-foot">${esc(s.nom)}${s.adresse ? ` · ${esc(s.adresse)}` : ''}${s.telephone ? ` · ${esc(s.telephone)}` : ''}${s.email ? ` · ${esc(s.email)}` : ''}</footer>
   </article>`;
+}
+
+// Tableau de la présence en ligne actuelle du client (s'il y en a une).
+function presenceEnLigne(c) {
+  if (!c.fiche) return '';
+  const rows = PLATEFORMES.map(pl => ({ pl, d: c.fiche.enLigne[pl.k] }))
+    .filter(({ pl, d }) => d.url || pl.champs.some(ch => num(d[ch]) > 0));
+  const contacts = num(c.fiche.bases.contactsClients), emails = num(c.fiche.bases.emails);
+  if (!rows.length && !contacts && !emails) return '';
+  const val = (d, ch) => num(d[ch]) ? (ch === 'note' ? String(d[ch]).replace('.', ',') + ' / 5' : fmt(d[ch]).replace(/,00$/, '')) : '—';
+  return `<div class="para"><h4>Présence en ligne actuelle</h4>
+    <table class="doc-table"><thead><tr><th>Plateforme</th><th>Chiffres clés</th><th class="r">Engagement</th></tr></thead>
+    <tbody>${rows.map(({ pl, d }) => {
+      const taux = num(d.abonnes) && num(d.interactions) ? (num(d.interactions) / num(d.abonnes) * 100).toFixed(1).replace('.', ',') + ' %' : '—';
+      return `<tr><td><b>${pl.label}</b>${d.url ? `<div class="muted">${esc(d.url)}</div>` : ''}</td>
+        <td>${pl.champs.map(ch => `${CHAMPS_LABELS[ch]} : <b>${val(d, ch)}</b>`).join(' · ')}</td><td class="r">${pl.social ? taux : '—'}</td></tr>`;
+    }).join('')}
+    ${contacts || emails ? `<tr><td><b>Données clients</b></td><td>${contacts ? `Contacts : <b>${fmt(contacts).replace(/,00$/, '')}</b>` : ''}${contacts && emails ? ' · ' : ''}${emails ? `Emails : <b>${fmt(emails).replace(/,00$/, '')}</b>` : ''}</td><td></td></tr>` : ''}
+    </tbody></table></div>`;
 }
 
 function rapportResultats(p) {
@@ -912,6 +1055,7 @@ function render() {
   else if (route === 'actions') { data.plans.forEach(normaliserPlan); html = viewActions(); }
   else if (route === 'factures') html = viewFactures();
   else if (route === 'facture' && factureById(id)) { nav = 'factures'; current.facture = factureById(id); html = viewFacture(current.facture); }
+  else if (route === 'client' && clientById(id)) { nav = 'clients'; current.client = normaliserFiche(clientById(id)); html = viewFiche(current.client); }
   else if (route === 'parametres') html = viewParametres();
   else { nav = 'dashboard'; html = viewDashboard(); }
   renderShell(nav);
@@ -999,6 +1143,14 @@ document.addEventListener('click', e => {
       data.factures.push(copy); persist(true); go(`#/facture/${copy.id}`); toast(`Facture ${copy.numero} créée (brouillon).`);
       break;
     }
+    case 'importer-fiche': {
+      const c = clientById(p.clientId);
+      if (!completude(c)) { toast('La fiche de cette entreprise est vide : remplissez-la d\'abord.', 'err'); break; }
+      const r = appliquerFiche(p, c, dureeMois(p));
+      persist(true); rerenderKeepScroll();
+      toast(`Fiche importée : ${r.swot} constat(s) SWOT, ${r.actions} action(s), ${r.objectifs} objectif(s) ajoutés.`);
+      break;
+    }
     case 'prefill': appliquerSuggestions(p, clientById(p.clientId)?.secteur); persist(); break;
     case 'add-row': {
       const list = el.dataset.list;
@@ -1078,8 +1230,10 @@ function handleForm(form) {
   if (kind === 'client') {
     const id = form.dataset.id;
     const fields = { nom: fd.nom.trim(), secteur: fd.secteur, taille: fd.taille, contact: fd.contact, telephone: fd.telephone, email: fd.email, nif: fd.nif, adresse: fd.adresse, siteWeb: fd.siteWeb };
-    if (id) Object.assign(clientById(id), fields); else data.clients.push({ id: uid(), ...fields });
-    persist(true); closeModal(); render(); toast('Entreprise enregistrée.');
+    if (id) { Object.assign(clientById(id), fields); persist(true); closeModal(); render(); toast('Entreprise enregistrée.'); return; }
+    const c = normaliserFiche({ id: uid(), ...fields });
+    data.clients.push(c); persist(true); closeModal();
+    go(`#/client/${c.id}`); toast('Entreprise enregistrée. Remplissez sa fiche pour adapter les plans.');
   } else if (kind === 'plan') {
     if (fd.motif === 'autre' && !fd.motifDetail.trim()) { toast('Précisez la raison du plan.', 'err'); form.querySelector('[name=motifDetail]').focus(); return; }
     if (fd.fin < fd.debut) { toast('La date de fin doit être après la date de début.', 'err'); return; }
@@ -1128,6 +1282,14 @@ function onInput(e) {
   } else if (el.dataset.fbind && current.facture) {
     setPath(current.facture, el.dataset.fbind, val);
     persist(); updateLiveFacture(current.facture);
+  } else if (el.dataset.cbind && current.client) {
+    if (el.dataset.list) {
+      const arr = getPath(current.client, el.dataset.cbind);
+      const i = arr.indexOf(el.dataset.list);
+      if (el.checked && i < 0) arr.push(el.dataset.list); else if (!el.checked && i >= 0) arr.splice(i, 1);
+    } else setPath(current.client, el.dataset.cbind, val);
+    current.client.fiche.majLe = todayISO();
+    persist(); updateLiveFiche(current.client);
   } else if (el.dataset.sbind) {
     setPath(data.settings, el.dataset.sbind, val);
     persist();
@@ -1162,6 +1324,7 @@ document.addEventListener('change', e => {
         askConfirm('Remplacer les données actuelles par cette sauvegarde ?', () => {
           const base = defaultData();
           data = { ...base, ...d, settings: { ...base.settings, ...d.settings }, factures: d.factures || [] };
+          data.plans.forEach(normaliserPlan); data.clients.forEach(normaliserFiche);
           persist(true); render(); toast('Sauvegarde importée.');
         }, 'Remplacer');
       } catch { toast('Fichier de sauvegarde invalide.', 'err'); }
@@ -1181,6 +1344,14 @@ window.addEventListener('hashchange', () => { closeModal(); render(); window.scr
 // ---------- Exemple ----------
 function chargerDemo() {
   const c = { id: uid(), nom: 'Boulangerie Soleil Levant', secteur: 'restaurant', taille: 'Petite entreprise (1-10)', contact: 'Marie Joseph', telephone: '+509 3700 0000', email: 'contact@soleillevant.ht', nif: '', adresse: 'Rue Capois, Port-au-Prince', siteWeb: '' };
+  normaliserFiche(c);
+  Object.assign(c.fiche.activite, { description: 'Boulangerie-pâtisserie artisanale de quartier.', produits: 'Pain frais, pâtisseries, gâteaux d\'anniversaire, petits-déjeuners', prix: '25 à 3 500 HTG', anciennete: '8 ans', employes: '6', zone: 'Port-au-Prince (centre et Bourdon)', saisonnalite: 'Forte demande en décembre et pour la fête des mères' });
+  Object.assign(c.fiche.clientele, { profil: 'Familles et travailleurs du quartier, 25-50 ans', decouverte: ['Bouche-à-oreille', 'Passage devant le local'], clientsMois: 1800, fideles: 55 });
+  Object.assign(c.fiche.concurrence, { concurrents: 'Deux boulangeries industrielles et les marchandes de pain de rue.', avantage: 'Produits faits maison chaque matin avec des ingrédients locaux', problemes: 'Ventes concentrées le matin\nPeu de nouveaux clients' });
+  Object.assign(c.fiche.enLigne.facebook, { url: 'facebook.com/soleillevant', abonnes: 1200, pubsMois: 3, interactions: 8 });
+  Object.assign(c.fiche.enLigne.google, { note: 4.6, avis: 23 });
+  Object.assign(c.fiche.enLigne.whatsapp, { contacts: 350 });
+  Object.assign(c.fiche.moyens, { budgetMensuel: 25000, gestionnaire: 'La propriétaire, le soir', supports: { logo: true } });
   data.clients.push(c);
   const debut = todayISO();
   const p = nouveauPlan({ clientId: c.id, titre: 'Lancement de la livraison à domicile', debut, fin: addMonths(debut, 6), budgetPrevu: 150000, prefill: true });
