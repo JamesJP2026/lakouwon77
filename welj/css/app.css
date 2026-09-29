@@ -309,3 +309,8 @@ details textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line)
   .label-grid span { display: flex; flex-direction: column; font-size: 10px; }
   .label-grid b { font-size: 14px; }
 }
+
+/* ---------- Aperçu en ligne (cadre) : impression et téléchargements indisponibles ---------- */
+.embedded [data-act^="print-"], .embedded [data-act^="export-"], .embedded [data-act="backup"],
+.embedded label.check:has(input[name="imprimer"]) { display: none !important; }
+.confirm-msg { font-size: 14.5px; line-height: 1.5; margin: 0; }

@@ -10,6 +10,24 @@ multi-devises et rapports.
 100 % en français, JavaScript vanilla, **aucune étape de build**, comme
 l'app POS Lakouwon de ce dépôt.
 
+## Version fichier unique (double-clic, sans serveur)
+
+`dist/Manager-Logistique-WELJ.html` contient toute l'application dans un
+seul fichier : copiez-le sur n'importe quel ordinateur et ouvrez-le d'un
+double-clic (Chrome, Edge ou Firefox). Pas d'installation, pas d'Internet
+nécessaire (seules les polices viennent de Google Fonts ; sans connexion,
+le navigateur utilise ses polices système).
+
+Après chaque modification du code, régénérez-le :
+
+```bash
+cd welj
+python3 build.py
+```
+
+Les données restent enregistrées dans le navigateur de l'ordinateur qui
+ouvre le fichier (utilisez Paramètres → Sauvegarde pour les transférer).
+
 ## Lancer l'application
 
 ```bash

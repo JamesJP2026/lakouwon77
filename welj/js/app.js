@@ -11,7 +11,7 @@ import {
   TYPES_POINT, typePoint, ACTIONS_ETAPE, actionEtape, itineraireType, retardEtape, ecartEtape,
 } from "./logic.js";
 import { syncDatesManifeste, bilanManifeste, enregistrerVoyage } from "./seed.js";
-import { esc, $, $$, openModal, closeModal, confirmBox, toast, formData, opt, printHtml, downloadCsv, download } from "./ui.js";
+import { esc, $, $$, openModal, closeModal, confirmBox, EMBED, toast, formData, opt, printHtml, downloadCsv, download } from "./ui.js";
 
 /* ---------- Rôles & navigation ---------- */
 const ROLES = {
@@ -1149,9 +1149,9 @@ const ACTIONS = {
       ${c.statut !== "recu" ? `<p class="muted small">Le colis a déjà quitté l'entrepôt : la facture ne sera recalculée que si vous cochez la case.</p><label class="check"><input type="checkbox" name="recalculer"> Recalculer la facture</label>` : ""}
       <div class="modal-actions"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Enregistrer</button></div></form>`, { wide: true });
   },
-  "delete-colis": el => {
+  "delete-colis": async el => {
     const c = colisOf(el.dataset.id);
-    if (!confirmBox(`Supprimer définitivement le colis ${c.tracking} ?`)) return;
+    if (!await confirmBox(`Supprimer définitivement le colis ${c.tracking} ?`)) return;
     store.mutate(d => { d.colis = d.colis.filter(x => x.id !== c.id); log("Suppression colis", c.tracking); });
     go("colis");
   },
@@ -1206,16 +1206,21 @@ const ACTIONS = {
       <div class="modal-actions">
         <button type="button" class="btn" data-act="close">Fermer</button>
         <button type="button" class="btn" data-act="notify-send" data-canal="SMS" data-id="${c.id}">Copier (SMS)</button>
-        <button type="button" class="btn btn-primary" data-act="notify-send" data-canal="WhatsApp" data-id="${c.id}" ${cl?.telephone ? "" : "disabled"}>Ouvrir WhatsApp</button>
-      </div></form>`);
+        ${cl?.telephone ? `<a class="btn btn-primary" id="wa-link" href="${esc(waLink(cl.telephone, msg))}" target="_blank" rel="noopener" data-act="notify-send" data-canal="WhatsApp" data-id="${c.id}">Ouvrir WhatsApp</a>` : ""}
+      </div></form>`, {
+      // Le lien WhatsApp suit les modifications du message
+      onMount: f => { const ta = f.querySelector("textarea"), a = f.querySelector("#wa-link"); ta.addEventListener("input", () => { if (a) a.href = waLink(cl.telephone, ta.value); }); },
+    });
   },
   "notify-send": el => {
     const c = colisOf(el.dataset.id); const cl = clientOf(c.clientId);
     const message = $("#modal-bg textarea[name=message]").value;
-    if (el.dataset.canal === "WhatsApp") window.open(waLink(cl.telephone, message), "_blank", "noopener");
-    else navigator.clipboard?.writeText(message);
-    store.mutate(d => { d.notifications.unshift({ id: store.uid(), date: store.nowIso(), colisId: c.id, clientId: c.clientId, canal: el.dataset.canal, message }); });
-    closeModal(); toast(el.dataset.canal === "WhatsApp" ? "WhatsApp ouvert" : "Message copié");
+    const noter = () => store.mutate(d => { d.notifications.unshift({ id: store.uid(), date: store.nowIso(), colisId: c.id, clientId: c.clientId, canal: el.dataset.canal, message }); });
+    if (el.dataset.canal === "WhatsApp") { noter(); closeModal(); toast("Message préparé dans WhatsApp : envoyez-le depuis WhatsApp"); return; }
+    const ta = $("#modal-bg textarea[name=message]");
+    const copie = navigator.clipboard?.writeText(message) || Promise.reject();
+    copie.then(() => { noter(); closeModal(); toast("Message copié : collez-le dans votre SMS"); },
+      () => { ta.focus(); ta.select(); toast("Copie automatique refusée : le message est sélectionné, copiez-le (Ctrl+C)", "bad"); });
   },
 
   "new-manifeste": () => openModal(manifesteForm({ mode: "air", transporteur: S().transporteurs.air, origine: "FLL", destination: "PAP", dateDepart: dayKey(Date.now() + 86400000) }), {
@@ -1253,19 +1258,19 @@ const ACTIONS = {
       onMount: f => { const sel = f.querySelector("[name=apres]"), pv = f.querySelector("[name=prevu]"); const upd = () => { pv.value = dtLocal(apres(sel.value)); }; sel.addEventListener("change", upd); upd(); },
     });
   },
-  "etape-delete": el => {
+  "etape-delete": async el => {
     const m = manifesteOf(el.dataset.id);
-    if (!confirmBox("Supprimer cette étape de l'itinéraire ?")) return;
+    if (!await confirmBox("Supprimer cette étape de l'itinéraire ?")) return;
     store.mutate(() => { m.etapes = m.etapes.filter(x => x.id !== el.dataset.etape); syncDatesManifeste(m); });
     closeModal();
   },
-  "etapes-reset": el => {
+  "etapes-reset": async el => {
     const m = manifesteOf(el.dataset.id);
-    if (!confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
+    if (!await confirmBox("Remplacer l'itinéraire par l'itinéraire type ?")) return;
     store.mutate(() => { m.etapes = itineraireType(m.mode, m.destination, m.dateDepart); syncDatesManifeste(m); });
   },
   "tf-remove": el => { ui.transfert.lignes = ui.transfert.lignes.filter(l => l.tracking !== el.dataset.id); ui.scanMsg = null; render(); },
-  "tf-reset": () => { if (!ui.transfert?.lignes.length || confirmBox("Vider ce bordereau ?")) { ui.transfert = null; ui.scanMsg = null; render(); } },
+  "tf-reset": async () => { if (!ui.transfert?.lignes.length || await confirmBox("Vider ce bordereau ?")) { ui.transfert = null; ui.scanMsg = null; render(); } },
   "tf-mark": el => {
     const t = transfertOf(el.dataset.id); const l = t.lignes[+el.dataset.i];
     store.mutate(() => { recevoirLigne(t, l); if (t.cloture) log("Transfert", `${t.numero} : ${l.tracking} finalement reçu`); });
@@ -1274,14 +1279,14 @@ const ACTIONS = {
     const t = transfertOf(el.dataset.id); const l = t.lignes[+el.dataset.i];
     store.mutate(() => { if (l.horsListe) t.lignes.splice(+el.dataset.i, 1); else Object.assign(l, { recu: false, dateReception: null, recuPar: null }); });
   },
-  "tf-all": el => {
+  "tf-all": async el => {
     const t = transfertOf(el.dataset.id); const n = t.lignes.filter(l => !l.recu).length;
-    if (!confirmBox(`Confirmer la réception des ${n} colis restants sans les scanner ?`)) return;
+    if (!await confirmBox(`Confirmer la réception des ${n} colis restants sans les scanner ?`)) return;
     store.mutate(() => { t.lignes.filter(l => !l.recu).forEach(l => recevoirLigne(t, l)); log("Transfert", `${t.numero} : ${n} colis marqués reçus`); });
   },
-  "tf-close": el => {
+  "tf-close": async el => {
     const t = transfertOf(el.dataset.id); const n = t.lignes.filter(l => !l.recu).length;
-    if (!confirmBox(n ? `${n} colis n'ont pas été reçus : ils seront marqués MANQUANTS. Clôturer ?` : "Clôturer la réception de ce transfert ?")) return;
+    if (!await confirmBox(n ? `${n} colis n'ont pas été reçus : ils seront marqués MANQUANTS. Clôturer ?` : "Clôturer la réception de ce transfert ?")) return;
     store.mutate(() => {
       t.lignes.forEach(l => { if (!l.recu) l.manquant = true; });
       t.cloture = store.nowIso();
@@ -1289,9 +1294,9 @@ const ACTIONS = {
     });
     ui.scanMsg = null; toast(n ? `${n} colis manquant(s) signalé(s)` : "Transfert complet", n ? "bad" : "good");
   },
-  "tf-delete": el => {
+  "tf-delete": async el => {
     const t = transfertOf(el.dataset.id);
-    if (!confirmBox(`Supprimer le transfert ${t.numero} ?`)) return;
+    if (!await confirmBox(`Supprimer le transfert ${t.numero} ?`)) return;
     store.mutate(d => { d.transferts = d.transferts.filter(x => x.id !== t.id); log("Transfert", `${t.numero} supprimé`); });
     go("transferts");
   },
@@ -1338,18 +1343,19 @@ const ACTIONS = {
   "export-paiements": () => downloadCsv("welj-paiements.csv", [["Reçu", "Date", "Client", "Colis", "Méthode", "Montant USD", "Montant HTG", "Référence"],
     ...db.paiements.map(p => [p.numero, p.date, clientOf(p.clientId)?.nom, colisOf(p.colisId)?.tracking, methode(p.methode), p.montant, p.montantHTG || "", p.reference])]),
 
-  "add-branch": () => {
-    const code = (prompt("Code de la succursale (3 lettres, ex. GON pour Gonaïves)") || "").trim().toUpperCase();
-    if (!code) return;
-    if (!/^[A-Z]{2,5}$/.test(code) || branch(code)) { toast("Code invalide ou déjà utilisé", "bad"); return; }
-    const nom = prompt("Nom de la succursale", "Succursale ") || code;
-    store.mutate(d => { d.settings.succursales.push({ id: code, nom, ville: nom.replace(/^Succursale\s*/i, ""), type: "destination", telephone: "" }); log("Paramètres", `Succursale ${code} ajoutée`); });
-  },
+  "add-branch": () => openModal(`<form data-form="branch-new"><h2>Nouvelle succursale</h2>
+    <div class="form-grid">
+      <div class="field"><label for="br-code">Code (2 à 5 lettres)</label><input id="br-code" name="code" required maxlength="5" placeholder="GON"></div>
+      <div class="field"><label for="br-ville">Ville</label><input id="br-ville" name="ville" required placeholder="Gonaïves"></div>
+    </div>
+    <div class="field"><label for="br-nom">Nom affiché</label><input id="br-nom" name="nom" placeholder="Succursale Gonaïves"></div>
+    <label class="check"><input type="checkbox" name="actif" checked> Ouverte (sélectionnable comme destination)</label>
+    <div class="modal-actions"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Ajouter</button></div></form>`),
   "new-user": () => openModal(userForm({ role: "comptoir", succursale: "PAP" })),
   "edit-user": el => openModal(userForm(db.users.find(u => u.id === el.dataset.id))),
   backup: () => download(`welj-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`, store.exportJson()),
-  "reset-demo": () => { if (confirmBox("Remplacer toutes les données par les données de démonstration ?")) { store.resetDemo(); toast("Données de démo rechargées"); } },
-  wipe: () => { if (confirmBox("Effacer TOUS les clients, colis, manifestes et paiements ? (les paramètres sont réinitialisés)")) { store.wipeAll(); toast("Base vidée"); } },
+  "reset-demo": async () => { if (await confirmBox("Remplacer toutes les données par les données de démonstration ?")) { store.resetDemo(); toast("Données de démo rechargées"); } },
+  wipe: async () => { if (await confirmBox("Effacer TOUS les clients, colis, manifestes et paiements ? (les paramètres sont réinitialisés)")) { store.wipeAll(); toast("Base vidée"); } },
 };
 
 const CHANGE_ACTIONS = {
@@ -1420,8 +1426,8 @@ function userForm(u) {
     <div class="modal-actions">${u.id && u.id !== me().id ? `<button type="button" class="btn btn-danger" data-act="delete-user" data-id="${u.id}">Supprimer</button>` : ""}
     <button type="button" class="btn" data-act="close">Annuler</button><button class="btn btn-primary">Enregistrer</button></div></form>`;
 }
-ACTIONS["delete-user"] = el => {
-  if (!confirmBox("Supprimer cet utilisateur ?")) return;
+ACTIONS["delete-user"] = async el => {
+  if (!await confirmBox("Supprimer cet utilisateur ?")) return;
   store.mutate(d => { d.users = d.users.filter(u => u.id !== el.dataset.id); });
   closeModal();
 };
@@ -1473,7 +1479,7 @@ const FORMS = {
       log("Réception", `${c.tracking} — ${clientOf(c.clientId).nom} — ${c.poids} lb`);
     });
     toast(`Colis ${c.tracking} enregistré — ${money(c.facture.total)}`);
-    if (d.imprimer) printLabel(c);
+    if (d.imprimer && !EMBED) printLabel(c);
   },
   "edit-colis": form => {
     const c = colisOf(form.dataset.id); const d = readColisForm(form);
@@ -1553,6 +1559,13 @@ const FORMS = {
       db_.manifestes.push(m); log("Nouveau manifeste", m.numero);
     });
     closeModal(); go("manifestes", m.id);
+  },
+  "branch-new": form => {
+    const d = formData(form); const code = d.code.toUpperCase();
+    if (!/^[A-Z]{2,5}$/.test(code)) { toast("Le code doit contenir 2 à 5 lettres", "bad"); return; }
+    if (branch(code)) { toast(`Le code ${code} est déjà utilisé`, "bad"); return; }
+    store.mutate(db_ => { db_.settings.succursales.push({ id: code, nom: d.nom || "Succursale " + d.ville, ville: d.ville, type: "destination", telephone: "", actif: d.actif }); log("Paramètres", `Succursale ${code} ajoutée`); });
+    closeModal(); toast(`Succursale ${code} ajoutée`);
   },
   "tf-scan": form => { ajouterTrackings(splitTrackings(form.code.value)); },
   "tf-bulk": form => { ajouterTrackings(splitTrackings(form.bulk.value)); },
@@ -1759,7 +1772,10 @@ function exportColis(list, filename) {
 ========================================================= */
 document.addEventListener("click", e => {
   const act = e.target.closest("[data-act]");
-  if (act && ACTIONS[act.dataset.act] && !act.disabled) { e.preventDefault(); ACTIONS[act.dataset.act](act, e); return; }
+  if (act && ACTIONS[act.dataset.act] && !act.disabled) {
+    if (!(act.tagName === "A" && act.target === "_blank")) e.preventDefault(); // un vrai lien externe (WhatsApp) doit s'ouvrir
+    ACTIONS[act.dataset.act](act, e); return;
+  }
   const row = e.target.closest("[data-href]");
   if (row && !e.target.closest("a,button,input,select,label")) go(...row.dataset.href.split("/"));
 });
@@ -1784,4 +1800,5 @@ document.addEventListener("submit", e => {
   if (form && FORMS[form.dataset.form]) { e.preventDefault(); FORMS[form.dataset.form](form); }
 });
 
+document.body.classList.toggle("embedded", EMBED);
 render();

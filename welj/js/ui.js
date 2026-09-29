@@ -23,7 +23,24 @@ export function openModal(html, { wide = false, onMount } = {}) {
 export function closeModal() { document.getElementById("modal-bg")?.remove(); }
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
-export function confirmBox(message) { return window.confirm(message); }
+/** L'app peut tourner dans un cadre (aperçu en ligne) où impression et téléchargements sont bloqués. */
+export const EMBED = (() => { try { return window.self !== window.top; } catch { return true; } })();
+
+/** Confirmation dans la page (les boîtes confirm()/prompt() du navigateur sont bloquées dans certains cadres). */
+export function confirmBox(message, { ok = "Confirmer", danger = false } = {}) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = v => { if (done) return; done = true; obs.disconnect(); closeModal(); resolve(v); };
+    const m = openModal(`<h2>Confirmation</h2><p class="confirm-msg">${esc(message).replace(/\n/g, "<br>")}</p>
+      <div class="modal-actions"><button type="button" class="btn" data-confirm="0">Annuler</button>
+      <button type="button" class="btn ${danger ? "btn-danger" : "btn-primary"}" data-confirm="1">${esc(ok)}</button></div>`);
+    m.addEventListener("click", e => { const b = e.target.closest("[data-confirm]"); if (b) finish(b.dataset.confirm === "1"); });
+    // Fermeture par Échap ou clic à l'extérieur = annulation
+    const obs = new MutationObserver(() => { if (!document.body.contains(m)) finish(false); });
+    obs.observe(document.body, { childList: true });
+    m.querySelector('[data-confirm="1"]').focus();
+  });
+}
 
 /* ---------- Toast ---------- */
 export function toast(msg, tone = "good") {
@@ -52,6 +69,7 @@ export const opt = (value, label, selected) => `<option value="${esc(value)}" ${
    Le document à imprimer est injecté dans #print-area ; la
    feuille @media print masque tout le reste de l'application. */
 export function printHtml(html, { format = "a4" } = {}) {
+  if (EMBED) { toast("Impression indisponible dans l'aperçu en ligne : ouvrez l'app sur votre ordinateur pour imprimer.", "bad"); return; }
   const area = document.getElementById("print-area");
   area.className = `print-${format}`;
   area.innerHTML = html;
@@ -68,6 +86,7 @@ export function downloadCsv(filename, rows) {
   download(filename, csv, "text/csv;charset=utf-8");
 }
 export function download(filename, content, type = "application/json") {
+  if (EMBED) { toast("Téléchargement indisponible dans l'aperçu en ligne : ouvrez l'app sur votre ordinateur.", "bad"); return; }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([content], { type }));
   a.download = filename; a.click();
