@@ -216,6 +216,28 @@ export const SECTEURS = {
     ],
     positionnement: 'Le meilleur de la production locale, de qualité constante.',
   },
+  logistique: {
+    label: 'Logistique / Transport / Livraison',
+    swot: { forces: 'Flotte de véhicules et chauffeurs expérimentés\nConnaissance des routes et des zones', faiblesses: 'Suivi des colis peu visible pour les clients\nDépendance au prix du carburant', opportunites: 'Essor du commerce en ligne et des livraisons à domicile\nEnvois de la diaspora (colis, transferts)\nEntreprises qui externalisent leur transport', menaces: 'Insécurité sur certaines routes\nConcurrence des livreurs indépendants à moto\nHausse du carburant et des pièces' },
+    objectifs: [
+      { objectif: 'Signer de nouveaux clients entreprises', indicateur: 'Contrats signés', cible: '+10', echeance: '6 mois' },
+      { objectif: 'Augmenter le volume de livraisons', indicateur: 'Livraisons / mois', cible: '+30 %', echeance: '6 mois' },
+      { objectif: 'Réduire les délais et les réclamations', indicateur: 'Livraisons à l\'heure', cible: '95 %', echeance: '3 mois' },
+    ],
+    cibles: [
+      { nom: 'Commerces et boutiques en ligne', description: 'Vendeurs sur Instagram / WhatsApp, boutiques, supermarchés', besoins: 'Livraison rapide et fiable, paiement à la livraison, suivi', canaux: 'Instagram, WhatsApp, démarchage' },
+      { nom: 'Entreprises et importateurs', description: 'PME, distributeurs, industriels', besoins: 'Transport régulier, entreposage, dédouanement, respect des délais', canaux: 'LinkedIn, email, rendez-vous, salons' },
+      { nom: 'Diaspora et particuliers', description: 'Familles qui envoient ou reçoivent des colis', besoins: 'Sécurité, prix clair, suivi du colis', canaux: 'Facebook, WhatsApp, radio' },
+    ],
+    actions: [
+      { canal: 'WhatsApp Business', action: 'Prise de commande et suivi des colis en temps réel' },
+      { canal: 'LinkedIn', action: 'Prospection des entreprises et présentation des offres B2B' },
+      { canal: 'Affichage / panneaux', action: 'Habillage des véhicules aux couleurs de l\'entreprise' },
+      { canal: 'Partenariats', action: 'Accords avec les boutiques en ligne et les plateformes de vente' },
+      { canal: 'Facebook / Instagram', action: 'Témoignages clients et promotion des tarifs de livraison' },
+    ],
+    positionnement: 'Le partenaire logistique fiable qui livre à temps, en toute sécurité, avec un suivi clair.',
+  },
   ong: {
     label: 'ONG / Association / Église',
     swot: { forces: 'Mission claire\nBénévoles engagés', faiblesses: 'Budget limité\nCommunication irrégulière', opportunites: 'Dons en ligne\nPartenaires internationaux', menaces: 'Lassitude des donateurs\nConcurrence pour les financements' },

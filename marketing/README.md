@@ -24,6 +24,7 @@ de bord crée un client et un plan complet pour découvrir l'application.
    conditions de paiement, mentions (coordonnées bancaires, MonCash…).
 2. **Entreprises clientes** : n'importe quel secteur (restauration, commerce,
    services, beauté, santé, immobilier, éducation, tech, tourisme, industrie,
+   logistique,
    ONG, autre).
 3. **Plan marketing** en 8 étapes, contenu saisi par l'utilisateur,
    enregistré automatiquement :
