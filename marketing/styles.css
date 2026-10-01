@@ -319,6 +319,30 @@ input[data-cbind$=".url"]{min-width:190px;}
 .chrono-form{flex:1; min-width:280px;}
 .chrono-badge{margin:0 16px 10px; padding:8px 10px; border-radius:8px; background:var(--red-bg); color:var(--red); font-weight:700; font-size:12.5px; text-decoration:none; text-align:center;}
 
+/* Équipe et partage */
+.sync-etat{color:#cfe5d8; text-decoration:none; font-size:12px; display:block;}
+.sync-etat span{color:#93a2bd;}
+.sync-etat.st-hors_ligne, .sync-etat.st-erreur{color:#f3c0bb;}
+.panel .sync-etat{display:inline; color:var(--green);}
+.panel .sync-etat.st-hors_ligne, .panel .sync-etat.st-erreur{color:var(--red);}
+.lien-partage{border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:10px;}
+.lien-partage input{margin-bottom:8px; font-size:12px;}
+code{background:var(--paper); padding:1px 5px; border-radius:4px; font-size:12px;}
+
+/* Portail client */
+body.portail{background:var(--paper);}
+.portail-main{max-width:720px; margin:0 auto; padding:20px 16px 60px;}
+.portail-head{display:flex; align-items:center; gap:12px; margin-bottom:16px;}
+.portail-titre{font-size:26px; margin:6px 0 8px; color:var(--navy);}
+.portail-liste{padding-left:18px; margin:0;} .portail-liste li{margin-bottom:8px;}
+.pub-carte{border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; background:#fff;}
+.pub-carte-tete{display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:6px;}
+.pub-carte p{margin:6px 0;}
+.pub-carte textarea{margin:6px 0;}
+.ok-txt{color:var(--green); font-weight:700;}
+.portail-erreur{text-align:center; margin-top:40px;}
+.c{text-align:center;}
+
 /* Filtres */
 .filters{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
 .filters input{flex:1; min-width:200px;}

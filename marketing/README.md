@@ -122,17 +122,107 @@ directe par une page web).
 - **Relance de facture** : message prêt à envoyer par WhatsApp ou email.
 - **Duplication de facture** (ex. facturation mensuelle).
 
+## Rédaction par IA
+
+Avec la clé API (Paramètres → Recherche par IA) : bouton **« ✨ Proposer avec
+l'IA »** sur chaque étape du plan (résumé, SWOT, objectifs, cibles,
+stratégie avec 3 slogans au choix, actions avec budgets et dates, suivi,
+bilan) et **« Rédiger tout le plan »** à partir de la fiche entreprise.
+Aperçu avant application (Compléter / Remplacer), coût estimé affiché.
+L'IA rédige aussi les publications du calendrier et le commentaire des
+rapports mensuels.
+
+## Signature du client
+
+Section **« Bon pour accord »** en fin de présentation : le client signe au
+doigt sur téléphone ou tablette ; le plan passe en « Accepté » et la
+facture d'acompte est proposée. Lignes de signature papier à l'impression
+si le client n'a pas signé à l'écran.
+
+## Facturation avancée
+
+- **Factures récurrentes** (mensuelles, trimestrielles, annuelles) : les
+  brouillons sont préparés automatiquement à chaque échéance.
+- **Relances** : rappel 3 jours avant, le jour même, puis chaque semaine en
+  retard, listées sur le tableau de bord avec un message adapté.
+- **Paiement** : MonCash, NatCash, virement, lien de paiement (Paramètres),
+  affichés sur la facture avec un **QR code**.
+
+## Calendrier de publication
+
+Étape du plan : vue mensuelle, publications par réseau (texte, visuel,
+hashtags), statuts idée → brouillon → à valider → validé → publié,
+glisser-déposer, filtres, proposition d'un mois complet par l'IA,
+calendrier à valider imprimable, publications de la semaine sur le tableau
+de bord.
+
+## Rapports mensuels
+
+Relevés par mois (dépensé, personnes touchées, prospects, ventes) dans
+« Résultats & pilotage », graphiques d'évolution, et **rapport mensuel**
+imprimable en PDF (chiffres et variations, évolution, réalisations,
+objectifs, commentaire) avec résumé prêt à envoyer par WhatsApp ou email.
+
+## Modèles de campagne
+
+Neuf modèles (lancement, fin d'année, ouverture, notoriété, relance des
+ventes, rentrée, événement, diaspora, fidélisation) : objectifs, actions
+datées dans la période et budget réparti. À la création du plan ou depuis
+l'étape Informations.
+
+## Temps & rentabilité
+
+Chronomètre et saisie du temps par client et par plan ; rentabilité par
+client (honoraires facturés hors achat média, coût du temps selon le coût
+horaire défini dans les Paramètres, marge, gain réel par heure).
+
+## Équipe et portail client (Supabase, facultatif)
+
+Pour travailler à plusieurs sur les mêmes données et faire valider les
+plans par les clients en ligne :
+
+1. Créer un projet sur supabase.com et exécuter
+   `marketing/supabase/marketing.sql` dans l'éditeur SQL.
+2. Paramètres → Équipe & synchronisation : adresse du projet et clé
+   `anon`, puis créer son compte et l'espace de l'agence (les données
+   locales y sont envoyées). Inviter les collègues par email.
+3. Les modifications sont synchronisées en temps réel entre les membres ;
+   l'application reste utilisable hors ligne (renvoi au retour de la
+   connexion). La clé API Claude n'est jamais envoyée.
+4. **Portail client** : mettre le dossier `marketing/` en ligne (Netlify,
+   Vercel, GitHub Pages…), indiquer son adresse dans les Paramètres, puis
+   bouton « 🔗 Lien client » dans la présentation ou le calendrier. Le
+   client ouvre `client.html` sur son téléphone, signe la proposition,
+   valide ou commente chaque publication et peut envoyer un message ; ses
+   réponses s'appliquent automatiquement au plan.
+
+Sécurité : toutes les tables sont protégées par RLS (accès réservé aux
+membres de l'espace) ; le portail client n'accède à aucune table, seulement
+à deux fonctions exigeant un jeton de partage valide (90 jours,
+désactivable), qui ne renvoient pas les informations internes (notes,
+résultats, temps). Le schéma a été testé sur PostgreSQL 16 avec une
+simulation des rôles Supabase (28 vérifications d'accès), mais pas sur un
+vrai projet Supabase.
+
 ## Fichiers
 
 ```
-index.html        page unique
+index.html        application
+client.html       portail client (validation et signature en ligne)
 styles.css        styles écran + impression
 js/app.js         vues, éditeur, présentation, factures, routeur
 js/store.js       stockage local, formatage, calcul des totaux
 js/analyse.js     score du plan, résultats, recommandations
 js/fiche.js       fiche entreprise, présence en ligne, diagnostic
-js/ia.js          recherche par IA (API Claude + recherche web)
-js/vendor/        SDK Anthropic assemblé pour le navigateur
+js/ia.js          recherche et rédaction par IA (API Claude)
+js/facturation.js factures récurrentes et calendrier des relances
+js/calendrier.js  calendrier de publication
+js/graphiques.js  histogrammes SVG des rapports
+js/modeles.js     modèles de plans par type de campagne
+js/sync.js        synchronisation avec l'espace d'équipe Supabase
+js/client.js      portail client (client.html)
+js/vendor/        SDK Anthropic, Supabase, générateur de QR code
+supabase/marketing.sql  schéma, sécurité (RLS) et fonctions du portail
 js/secteurs.js    suggestions par secteur d'activité et liste des canaux
 ```
 

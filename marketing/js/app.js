@@ -5,6 +5,7 @@ import {
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
 import { histogramme } from './graphiques.js';
+import { sync } from './sync.js';
 import { MODELES, appliquerModele } from './modeles.js';
 import { STATUTS_PUB, nouvellePublication, grilleMois, moisDecale, libelleMois, abregeCanal } from './calendrier.js';
 import { FREQUENCES, dateSuivante, genererRecurrentes, relancesAFaire } from './facturation.js';
@@ -25,7 +26,7 @@ const $modal = document.getElementById('modal');
 let saveTimer;
 function persist(now = false) {
   clearTimeout(saveTimer);
-  const run = () => { if (!save(data)) toast('Impossible d\'enregistrer : stockage du navigateur plein (logo trop lourd ?).', 'err'); };
+  const run = () => { if (!save(data)) toast('Impossible d\'enregistrer : stockage du navigateur plein (logo trop lourd ?).', 'err'); sync.planifierEnvoi(); };
   now ? run() : (saveTimer = setTimeout(run, 300));
 }
 
@@ -141,7 +142,9 @@ function renderShell(active) {
       ${NAV.map(([k, ic, l]) => `<a class="navlink ${active === k ? 'active' : ''}" href="#/${k}"><span class="ic">${ic}</span>${l}</a>`).join('')}
     </nav>
     ${data.chrono ? `<a class="chrono-badge" href="#/temps">⏱ Chrono en cours</a>` : ''}
-    <div class="sidebar-foot">Données enregistrées dans ce navigateur.<br>Pensez à exporter une sauvegarde.</div>`;
+    <div class="sidebar-foot">${(() => { const e = sync.etatSync(); return e.espace
+      ? `<a href="#/parametres" class="sync-etat st-${e.statut}">☁ ${esc(e.espace.nom)}<br><span>${{ synchro: 'Synchronisé', envoi: 'Envoi en cours…', connexion: 'Connexion…', hors_ligne: 'Hors ligne : modifications gardées', erreur: 'Erreur de synchronisation' }[e.statut] || ''}</span></a>`
+      : 'Données enregistrées dans ce navigateur.<br>Pensez à exporter une sauvegarde.'; })()}</div>`;
 }
 
 const topbar = (titre, sous, actions = '') => `
@@ -846,6 +849,7 @@ function vueCalendrier(p) {
         <select data-cal-filtre="canal"><option value="">Tous les réseaux</option>${canaux.map(c => `<option ${calFiltre.canal === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <button class="btn btn-sm btn-ia" data-action="ia-calendrier">✨ Proposer les publications du mois</button>
         <button class="btn btn-sm" data-action="cal-imprimer">🖨 Calendrier à valider</button>
+        <button class="btn btn-sm" data-action="partage-client" data-id="${p.id}">🔗 Faire valider par le client</button>
       </div>
     </div>
     <div class="cal-grid">
@@ -1016,6 +1020,7 @@ function viewPresentation(p) {
     <button class="btn" data-action="print">🖨 Imprimer / PDF</button>
     ${p.statut === 'brouillon' ? `<button class="btn btn-primary" data-action="plan-statut" data-id="${p.id}" data-statut="presente">Marquer comme présenté</button>` : `
       <select class="btn" data-action-change="plan-statut" data-id="${p.id}">${Object.entries(STATUTS_PLAN).map(([k, l]) => `<option value="${k}" ${p.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`}
+    <button class="btn" data-action="partage-client" data-id="${p.id}">🔗 Lien client</button>
     <button class="btn btn-gold" data-action="gen-facture" data-id="${p.id}">Générer la facture</button>`;
 
   return topbar('Présentation du plan', `${badge(p.statut, STATUTS_PLAN)}${p.datePresentation ? ` · présenté le ${dateFr(p.datePresentation)}` : ''}
@@ -1081,6 +1086,7 @@ function viewPresentation(p) {
       ${total > 0 ? `<tr><td colspan="3" class="r muted">Budget publicitaire (achat média, hors honoraires)</td><td class="r num muted">${money(total)}</td></tr>` : ''}</tfoot></table>
       ${para('', p.notes)}` : '')}
 
+    ${(p.messagesClient || []).length ? `<section class="doc-section no-print"><h2><span>✉</span>Messages du client</h2>${p.messagesClient.map(m => `<p><b>${dateCourte(m.date)}${m.nom ? ' · ' + esc(m.nom) : ''}</b> — ${nl2br(m.texte)}</p>`).join('')}</section>` : ''}
     ${blocSignature(p, c)}
 
     <footer class="doc-foot">${esc(s.nom)}${s.adresse ? ` · ${esc(s.adresse)}` : ''}${s.telephone ? ` · ${esc(s.telephone)}` : ''}${s.email ? ` · ${esc(s.email)}` : ''}</footer>
@@ -1438,6 +1444,144 @@ function modalTemps(t) {
     </form>`);
 }
 
+// ---------- Équipe (Supabase) et portail client ----------
+let infosEquipe = null; // membres et invitations chargés à la demande
+
+function panneauEquipe() {
+  const c = sync.config(), e = sync.etatSync();
+  if (!c.url) return `
+    <p class="muted">Pour travailler à plusieurs sur les mêmes données en temps réel et partager les plans avec vos clients (validation des publications, signature en ligne), reliez l'application à un projet <b>Supabase</b> gratuit, comme l'application POS. Sans cela, tout reste dans ce navigateur.</p>
+    <ol class="muted steps-list">
+      <li>Créez un projet sur <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>.</li>
+      <li>Dans l'éditeur SQL du projet, exécutez le fichier <code>marketing/supabase/marketing.sql</code>.</li>
+      <li>Copiez l'adresse du projet et la clé <b>anon</b> publique (Project Settings → API).</li>
+    </ol>
+    <div class="form-grid">
+      <label>Adresse du projet<input id="sb-url" placeholder="https://xxxx.supabase.co"></label>
+      <label>Clé anon publique<input id="sb-cle" placeholder="eyJ…"></label>
+    </div>
+    <div class="row-btns mt"><button class="btn btn-primary" data-action="sb-configurer">Relier au projet</button></div>`;
+  if (!e.utilisateur) return `
+    <p class="muted">Projet relié : ${esc(c.url)}. Connectez-vous, ou créez votre compte (chaque membre de l'équipe a le sien).</p>
+    <div class="form-grid">
+      <label>Email<input id="sb-email" type="email" autocomplete="username"></label>
+      <label>Mot de passe<input id="sb-mdp" type="password" autocomplete="current-password"></label>
+    </div>
+    <div class="row-btns mt"><button class="btn btn-primary" data-action="sb-connexion">Se connecter</button><button class="btn" data-action="sb-inscription">Créer un compte</button>
+      <button class="btn btn-sm" data-action="sb-oublier">Changer de projet</button></div>`;
+  if (!e.espace) return `
+    <p>Connecté : <b>${esc(e.utilisateur.email)}</b> <button class="btn btn-sm" data-action="sb-deconnexion">Se déconnecter</button></p>
+    <div data-espaces><button class="btn" data-action="sb-espaces">Voir mes espaces</button></div>
+    <div class="form-grid mt"><label>Nouvel espace (nom de l'agence)<input id="sb-espace-nom" value="${esc(data.settings.nom)}"></label></div>
+    <div class="row-btns mt"><button class="btn btn-primary" data-action="sb-creer-espace">Créer l'espace avec mes données</button></div>
+    <p class="muted">Un collègue invité retrouve l'espace dans « Voir mes espaces » après s'être connecté avec l'email invité.</p>`;
+  const m = infosEquipe;
+  const admin = m?.membres.some(x => x.user_id === e.utilisateur.id && x.role === 'admin');
+  return `
+    <p>Espace <b>${esc(e.espace.nom)}</b> · connecté en tant que <b>${esc(e.utilisateur.email)}</b> · <span class="sync-etat st-${e.statut}">${{ synchro: 'synchronisé ✓', envoi: 'envoi…', hors_ligne: 'hors ligne', erreur: 'erreur : ' + esc(e.erreur), connexion: 'connexion…' }[e.statut] || ''}</span></p>
+    ${m ? `<div class="table-wrap flat"><table><thead><tr><th>Membre</th><th>Rôle</th><th></th></tr></thead><tbody>
+      ${m.membres.map(x => `<tr><td>${esc(x.email || x.user_id)}</td><td>${x.role === 'admin' ? 'Administrateur' : 'Membre'}</td><td class="r">${admin && x.user_id !== e.utilisateur.id ? `<button class="btn btn-sm btn-danger" data-action="sb-retirer" data-id="${x.user_id}">Retirer</button>` : ''}</td></tr>`).join('')}
+      ${m.invitations.map(x => `<tr><td>${esc(x.email)} <span class="muted">(invitation en attente)</span></td><td>${x.role === 'admin' ? 'Administrateur' : 'Membre'}</td><td class="r">${admin ? `<button class="btn btn-sm" data-action="sb-annuler-inv" data-email="${esc(x.email)}">Annuler</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${admin ? `<div class="form-grid mt"><label>Inviter (email)<input id="sb-inv-email" type="email"></label><label>Rôle<select id="sb-inv-role"><option value="membre">Membre</option><option value="admin">Administrateur</option></select></label></div>
+      <div class="row-btns mt"><button class="btn btn-primary" data-action="sb-inviter">Inviter</button></div>
+      <p class="muted">La personne crée son compte avec cet email (bouton « Créer un compte ») et rejoint l'espace automatiquement.</p>` : ''}`
+    : '<button class="btn" data-action="sb-membres">Voir les membres</button>'}
+    <div class="form-grid mt"><label class="full">Adresse publique du portail client (facultatif)<input data-sbind="urlPortail" value="${esc(data.settings.urlPortail || '')}" placeholder="https://mon-agence.netlify.app/"></label></div>
+    <p class="muted">Le portail client (fichier <code>client.html</code>) doit être mis en ligne avec l'application (Netlify, Vercel, GitHub Pages…) pour que vos clients puissent ouvrir les liens de validation.</p>
+    <div class="row-btns mt"><button class="btn" data-action="sb-quitter">Travailler hors espace</button><button class="btn" data-action="sb-deconnexion">Se déconnecter</button></div>`;
+}
+
+const majEquipe = () => { const z = document.querySelector('[data-equipe]'); if (z) z.innerHTML = panneauEquipe(); renderShell(current.nav || 'parametres'); };
+
+async function actionEquipe(fn, ok) {
+  try { const r = await fn(); if (ok) toast(typeof ok === 'function' ? ok(r) : ok); majEquipe(); return r; }
+  catch (e) { toast(sync.erreurLisible(e), 'err'); return null; }
+}
+
+async function ouvrirEspaceUI(espace) {
+  const docs = (data.clients.length + data.plans.length + data.factures.length) > 0;
+  const lancer = mode => actionEquipe(async () => {
+    const r = await sync.ouvrirEspace(espace, data, mode);
+    save(data); render();
+    return r;
+  }, r => `Espace « ${espace.nom} » ouvert : ${r.recus} document(s) reçu(s), ${r.envoyes} envoyé(s).`);
+  if (!docs) return lancer('recevoir');
+  openModal(`<h2>Ouvrir l'espace « ${esc(espace.nom)} »</h2>
+    <p>Ce navigateur contient déjà des données. Que voulez-vous faire ?</p>
+    <div class="modal-actions wrap">
+      <button type="button" class="btn" data-action="close-modal">Annuler</button>
+      <button type="button" class="btn" data-action="sb-ouvrir-mode" data-mode="recevoir">Remplacer par les données de l'espace</button>
+      <button type="button" class="btn btn-primary" data-action="sb-ouvrir-mode" data-mode="envoyer">Ajouter mes données à l'espace</button>
+    </div><p class="muted">Conseil : exportez d'abord une sauvegarde (Paramètres → Sauvegarde).</p>`, true);
+  espaceEnAttente = { espace, lancer };
+}
+let espaceEnAttente = null;
+
+// Réponse envoyée par un client depuis le portail.
+function appliquerRetour(r) {
+  const p = planById(r.plan_id);
+  if (!p) return;
+  normaliserPlan(p);
+  const client = clientById(p.clientId)?.nom || 'Le client';
+  if (r.type === 'publication') {
+    const pub = p.publications.find(x => x.id === r.cible);
+    if (!pub) return;
+    pub.statut = r.statut === 'valide' ? 'valide' : 'brouillon';
+    if (r.commentaire) pub.commentaire = `Client : ${r.commentaire}`;
+    toast(`${client} : publication « ${pub.titre || pub.canal} » ${r.statut === 'valide' ? 'validée ✓' : 'à modifier'}.`);
+  } else if (r.type === 'signature') {
+    p.signature = { image: r.image, nom: r.nom, fonction: r.fonction || '', date: (r.cree_le || todayISO()).slice(0, 10), enLigne: true };
+    p.statut = 'accepte';
+    if (!p.datePresentation) p.datePresentation = todayISO();
+    toast(`${client} a signé la proposition « ${p.titre} » ✓`);
+  } else if (r.type === 'commentaire') {
+    p.messagesClient = [...(p.messagesClient || []), { date: (r.cree_le || todayISO()).slice(0, 10), nom: r.nom || '', texte: r.commentaire || '' }];
+    toast(`Nouveau message de ${client} sur « ${p.titre} ».`);
+  }
+  persist(true);
+  rendreSiPossible();
+}
+
+// Ne pas redessiner pendant que l'utilisateur tape (perte du curseur) : on attend qu'il quitte le champ.
+let renduEnAttente = false;
+function rendreSiPossible() {
+  const a = document.activeElement;
+  if (a && $view.contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) { renduEnAttente = true; return; }
+  if (!$modal.innerHTML) rerenderKeepScroll(); else renduEnAttente = true;
+}
+document.addEventListener('focusout', () => setTimeout(() => { if (renduEnAttente && !$modal.innerHTML && !$view.contains(document.activeElement)) { renduEnAttente = false; rerenderKeepScroll(); } }, 50));
+
+function lienPortail(token) {
+  const c = sync.config();
+  const base = (data.settings.urlPortail || '').trim();
+  if (!base) return '';
+  return `${base.replace(/\/?(index\.html)?$/, '/')}client.html#t=${token}&u=${encodeURIComponent(c.url)}&k=${encodeURIComponent(c.cle)}`;
+}
+
+async function modalPartage(p) {
+  if (!sync.etatSync().espace) {
+    openModal(`<h2>Lien client</h2><p>Le partage avec le client nécessite un espace d'équipe en ligne (Supabase). Configurez-le dans Paramètres → Équipe & synchronisation.</p>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button><a class="btn btn-primary" href="#/parametres">Paramètres</a></div>`);
+    return;
+  }
+  let liens = [];
+  try { liens = await sync.listerPartages(p.id); } catch (e) { toast(sync.erreurLisible(e), 'err'); return; }
+  const actifs = liens.filter(l => l.actif && l.expire_le > new Date().toISOString());
+  const c = clientById(p.clientId) || {};
+  const tel = String(c.telephone || '').replace(/\D/g, '');
+  openModal(`<h2>Partager avec le client</h2>
+    <p class="muted">Le client ouvre le lien sur son téléphone : il voit la proposition, peut la <b>signer</b>, et <b>valider ou commenter</b> chaque publication du calendrier. Ses réponses arrivent ici automatiquement.</p>
+    ${data.settings.urlPortail ? '' : '<p class="hint">Indiquez d\'abord l\'adresse publique du portail dans Paramètres → Équipe & synchronisation.</p>'}
+    ${actifs.length ? actifs.map(l => { const u = lienPortail(l.token); return `<div class="lien-partage">
+      <input readonly value="${esc(u || l.token)}" onclick="this.select()"><div class="row-btns">
+      <button class="btn btn-sm" data-action="partage-copier" data-lien="${esc(u)}">Copier</button>
+      ${tel && u ? `<a class="btn btn-sm btn-primary" target="_blank" rel="noopener" href="https://wa.me/${tel}?text=${encodeURIComponent(`Bonjour${c.contact ? ' ' + c.contact : ''}, voici votre espace pour consulter et valider le plan « ${p.titre} » : ${u}`)}">WhatsApp</a>` : ''}
+      <button class="btn btn-sm btn-danger" data-action="partage-desactiver" data-token="${esc(l.token)}">Désactiver</button></div>
+      <div class="muted">Valable jusqu'au ${dateCourte(l.expire_le.slice(0, 10))}</div></div>`; }).join('') : '<p>Aucun lien actif.</p>'}
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button><button type="button" class="btn btn-primary" data-action="partage-creer">Créer un nouveau lien</button></div>`, true);
+}
+
 // ---------- Factures ----------
 const factureEnRetard = f => ['envoyee', 'partielle'].includes(f.statut) && f.echeance < todayISO();
 
@@ -1607,6 +1751,7 @@ function viewParametres() {
         <p class="full muted">Ces coordonnées apparaissent sur chaque facture avec un QR code, et dans les messages de relance.</p>
         <label class="full">Mentions en bas de facture (coordonnées bancaires, MonCash…)<textarea data-sbind="mentions" rows="2">${esc(s.mentions)}</textarea></label>
       </div></div>
+    <div class="panel" id="panneau-equipe"><h3>Équipe & synchronisation</h3><div data-equipe>${panneauEquipe()}</div></div>
     <div class="panel"><h3>Recherche par IA</h3>
       <p class="muted">Permet au bouton « Rechercher avec l'IA » de la fiche entreprise de chercher les informations publiques sur le web (modèle Claude d'Anthropic).</p>
       <ol class="muted steps-list">
@@ -1659,6 +1804,7 @@ function render() {
   else if (route === 'client' && clientById(id)) { nav = 'clients'; current.client = normaliserFiche(clientById(id)); html = viewFiche(current.client); }
   else if (route === 'parametres') html = viewParametres();
   else { nav = 'dashboard'; html = viewDashboard(); }
+  current.nav = nav;
   renderShell(nav);
   $view.innerHTML = html;
   initSignature();
@@ -1774,6 +1920,42 @@ document.addEventListener('click', e => {
       break;
     }
     case 'cal-imprimer': imprimerCalendrier(p); break;
+    case 'sb-configurer': actionEquipe(() => sync.configurer(document.getElementById('sb-url').value, document.getElementById('sb-cle').value), 'Projet relié. Connectez-vous ou créez votre compte.'); break;
+    case 'sb-connexion': case 'sb-inscription': {
+      const email = document.getElementById('sb-email').value.trim(), mdp = document.getElementById('sb-mdp').value;
+      if (!email || mdp.length < 6) { toast('Email et mot de passe (6 caractères minimum) requis.', 'err'); break; }
+      actionEquipe(() => sync.seConnecter(email, mdp, a === 'sb-inscription'), r => r.confirmation ? 'Compte créé : confirmez votre email (lien reçu), puis connectez-vous.' : 'Connecté.');
+      break;
+    }
+    case 'sb-oublier': localStorage.removeItem('lakouwon-marketing-sync'); location.reload(); break;
+    case 'sb-deconnexion': actionEquipe(() => sync.seDeconnecter(), 'Déconnecté : les données restent dans ce navigateur.'); break;
+    case 'sb-espaces': actionEquipe(async () => {
+      const liste = await sync.listerEspaces();
+      document.querySelector('[data-espaces]').innerHTML = liste.length ? `<div class="row-btns">${liste.map(x => `<button class="btn" data-action="sb-ouvrir" data-id="${x.id}" data-nom="${esc(x.nom)}">Ouvrir « ${esc(x.nom)} »</button>`).join('')}</div>` : '<p class="muted">Aucun espace pour ce compte.</p>';
+    }); return;
+    case 'sb-ouvrir': ouvrirEspaceUI({ id: el.dataset.id, nom: el.dataset.nom }); break;
+    case 'sb-ouvrir-mode': if (espaceEnAttente) { closeModal(); espaceEnAttente.lancer(el.dataset.mode); espaceEnAttente = null; } break;
+    case 'sb-creer-espace': {
+      const nom = document.getElementById('sb-espace-nom').value.trim();
+      if (!nom) { toast('Indiquez un nom.', 'err'); break; }
+      actionEquipe(async () => { const esp = await sync.creerEspace(nom); const r = await sync.ouvrirEspace(esp, data, 'envoyer'); save(data); render(); return r; },
+        r => `Espace créé : ${r.envoyes} document(s) envoyé(s). Invitez maintenant votre équipe.`);
+      break;
+    }
+    case 'sb-membres': actionEquipe(async () => { infosEquipe = await sync.membres(); }); break;
+    case 'sb-inviter': {
+      const email = document.getElementById('sb-inv-email').value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Email invalide.', 'err'); break; }
+      actionEquipe(async () => { await sync.inviter(email, document.getElementById('sb-inv-role').value); infosEquipe = await sync.membres(); }, `Invitation enregistrée pour ${email}.`);
+      break;
+    }
+    case 'sb-annuler-inv': actionEquipe(async () => { await sync.annulerInvitation(el.dataset.email); infosEquipe = await sync.membres(); }); break;
+    case 'sb-retirer': askConfirm('Retirer ce membre de l\'espace ?', () => actionEquipe(async () => { await sync.retirerMembre(id); infosEquipe = await sync.membres(); }, 'Membre retiré.'), 'Retirer'); break;
+    case 'sb-quitter': askConfirm('Travailler hors espace ? Les données restent dans ce navigateur mais ne seront plus synchronisées.', () => actionEquipe(() => sync.quitterEspace(), 'Mode local.'), 'Continuer'); break;
+    case 'partage-client': modalPartage(planById(id) || p); break;
+    case 'partage-creer': { const pl = p || planById($modal.querySelector('[data-plan]')?.dataset.plan); actionEquipe(() => sync.creerPartage(pl.id)).then(r => { if (r) modalPartage(pl); }); break; }
+    case 'partage-desactiver': actionEquipe(() => sync.desactiverPartage(el.dataset.token), 'Lien désactivé.').then(() => modalPartage(p)); break;
+    case 'partage-copier': (navigator.clipboard?.writeText(el.dataset.lien) || Promise.reject()).then(() => toast('Lien copié.')).catch(() => toast('Sélectionnez le lien et copiez-le.')); break;
     case 'temps-ajouter': if (!data.clients.length) { toast('Ajoutez d\'abord une entreprise cliente.', 'err'); break; } modalTemps(null); break;
     case 'temps-modifier': modalTemps(data.temps.find(t => t.id === id)); break;
     case 'temps-suppr': askConfirm('Supprimer ce temps ?', () => { data.temps = data.temps.filter(t => t.id !== id); persist(true); render(); }, 'Supprimer'); break;
@@ -2157,5 +2339,12 @@ function chargerDemo() {
   toast('Exemple chargé : un client et un plan complet.');
 }
 
+sync.initialiser({
+  donnees: () => data,
+  distant: () => { save(data); rendreSiPossible(); },
+  retour: appliquerRetour,
+  statut: () => { renderShell(current.nav || 'dashboard'); const z = document.querySelector('[data-equipe]'); if (z && !z.contains(document.activeElement)) z.innerHTML = panneauEquipe(); },
+});
 verifierRecurrentes();
 render();
+sync.reprendre(data).then(ok => { if (ok) { save(data); data.plans.forEach(normaliserPlan); data.clients.forEach(normaliserFiche); rendreSiPossible(); } });
