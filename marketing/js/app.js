@@ -236,7 +236,7 @@ function viewClients() {
       </td></tr>`;
   }).join('');
   return topbar('Entreprises clientes', 'Tout type d\'entreprise : commerce, restaurant, services, santé, ONG…',
-    `<button class="btn btn-primary" data-action="edit-client">+ Nouvelle entreprise</button>`) +
+    `<label class="btn">⇧ Importer une fiche<input type="file" accept="application/json,.json" data-action-change="import-fiche" hidden></label><button class="btn btn-primary" data-action="edit-client">+ Nouvelle entreprise</button>`) +
     (data.clients.length ? `<div class="table-wrap"><table>
       <thead><tr><th>Entreprise</th><th>Secteur</th><th title="Fiche entreprise complétée">Fiche</th><th>Contact</th><th class="c">Plans</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>` : '<div class="panel muted">Aucune entreprise cliente. Ajoutez-en une pour créer son premier plan.</div>');
@@ -311,7 +311,7 @@ function viewFiche(c) {
   const pct = completude(c);
   const plans = data.plans.filter(p => p.clientId === c.id);
   return topbar(`Fiche entreprise — ${esc(c.nom)}`, `${esc(secteurLabel(c.secteur))}${f.majLe ? ` · mise à jour le ${dateCourte(f.majLe)}` : ''}`,
-    `<a class="btn" href="#/clients">← Entreprises</a><button class="btn" data-action="edit-client" data-id="${c.id}">Coordonnées</button><button class="btn btn-primary" data-action="new-plan-for" data-id="${c.id}">+ Nouveau plan</button>`) + `
+    `<a class="btn" href="#/clients">← Entreprises</a><button class="btn" data-action="edit-client" data-id="${c.id}">Coordonnées</button><button class="btn" data-action="export-fiche" data-id="${c.id}">⇩ Exporter la fiche</button><button class="btn btn-primary" data-action="new-plan-for" data-id="${c.id}">+ Nouveau plan</button>`) + `
   <div class="fiche-layout">
     <div>
       <div class="panel intro-fiche">
@@ -1638,6 +1638,52 @@ async function modalPartage(p) {
     <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button><button type="button" class="btn btn-primary" data-action="partage-creer">Créer un nouveau lien</button></div>`, true);
 }
 
+// ---------- Import / export d'une fiche entreprise ----------
+let ficheImportee = null;
+
+// Complète les champs vides de « cible » avec ceux de « source » (objets imbriqués compris).
+function completerVides(cible, source) {
+  let n = 0;
+  for (const [k, v] of Object.entries(source || {})) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && cible[k] && typeof cible[k] === 'object' && !Array.isArray(cible[k])) n += completerVides(cible[k], v);
+    else if (Array.isArray(v)) { if (!Array.isArray(cible[k]) || !cible[k].length) { if (v.length) { cible[k] = v; n++; } } }
+    else if ((cible[k] === '' || cible[k] === null || cible[k] === undefined || cible[k] === 0) && v !== '' && v !== null && v !== undefined) { cible[k] = v; n++; }
+  }
+  return n;
+}
+
+function importerFiche(json) {
+  if (json?.type !== 'fiche-entreprise' || !json.client?.nom) throw new Error('format');
+  const c = normaliserFiche(structuredClone(json.client));
+  if (!SECTEURS[c.secteur]) c.secteur = 'autre';
+  ficheImportee = c;
+  const existant = data.clients.find(x => x.nom.trim().toLowerCase() === c.nom.trim().toLowerCase());
+  if (!existant) return importerFicheChoix('nouvelle');
+  openModal(`<h2>« ${esc(c.nom)} » existe déjà</h2>
+    <p>Voulez-vous compléter la fiche existante avec les informations du fichier, ou créer une seconde entreprise ?</p>
+    <div class="modal-actions wrap"><button type="button" class="btn" data-action="close-modal">Annuler</button>
+      <button type="button" class="btn" data-action="import-fiche-nouvelle">Créer une seconde fiche</button>
+      <button type="button" class="btn btn-primary" data-action="import-fiche-maj">Compléter la fiche existante</button></div>`);
+}
+
+function importerFicheChoix(mode) {
+  const c = ficheImportee;
+  if (!c) return;
+  ficheImportee = null;
+  if (mode === 'maj') {
+    const ex = normaliserFiche(data.clients.find(x => x.nom.trim().toLowerCase() === c.nom.trim().toLowerCase()));
+    const n = completerVides(ex, { ...c, id: undefined });
+    // Recherche sur internet du fichier : reprise si elle est plus récente.
+    if (c.fiche.web && (!ex.fiche.web || c.fiche.web.date >= ex.fiche.web.date)) ex.fiche.web = c.fiche.web;
+    if (c.fiche.recherche && !ex.fiche.recherche.includes(c.fiche.recherche)) ex.fiche.recherche = [ex.fiche.recherche, c.fiche.recherche].filter(Boolean).join('\n\n');
+    persist(true); closeModal(); go(`#/client/${ex.id}`); toast(`Fiche complétée : ${n} information(s) ajoutée(s).`);
+  } else {
+    c.id = uid();
+    data.clients.push(c);
+    persist(true); closeModal(); go(`#/client/${c.id}`); toast(`Entreprise « ${c.nom} » importée.`);
+  }
+}
+
 // ---------- Factures ----------
 const factureEnRetard = f => ['envoyee', 'partielle'].includes(f.statut) && f.echeance < todayISO();
 
@@ -1988,6 +2034,17 @@ document.addEventListener('click', e => {
       break;
     }
     case 'cal-imprimer': imprimerCalendrier(p); break;
+    case 'export-fiche': {
+      const c = clientById(id);
+      const blob = new Blob([JSON.stringify({ type: 'fiche-entreprise', version: 1, client: c }, null, 2)], { type: 'application/json' });
+      const lien = document.createElement('a');
+      lien.href = URL.createObjectURL(blob);
+      lien.download = `fiche-${c.nom.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.json`;
+      lien.click(); URL.revokeObjectURL(lien.href);
+      break;
+    }
+    case 'import-fiche-maj': importerFicheChoix('maj'); break;
+    case 'import-fiche-nouvelle': importerFicheChoix('nouvelle'); break;
     case 'sb-configurer': actionEquipe(() => sync.configurer(document.getElementById('sb-url').value, document.getElementById('sb-cle').value), 'Projet relié. Connectez-vous ou créez votre compte.'); break;
     case 'sb-connexion': case 'sb-inscription': {
       const email = document.getElementById('sb-email').value.trim(), mdp = document.getElementById('sb-mdp').value;
@@ -2308,6 +2365,10 @@ document.addEventListener('change', e => {
     const r = new FileReader();
     r.onload = () => { data.settings.logo = r.result; persist(true); render(); };
     r.readAsDataURL(file);
+  } else if (a === 'import-fiche' && el.files[0]) {
+    const r = new FileReader();
+    r.onload = () => { try { importerFiche(JSON.parse(r.result)); } catch { toast('Fichier de fiche invalide.', 'err'); } el.value = ''; };
+    r.readAsText(el.files[0]);
   } else if (a === 'import' && el.files[0]) {
     const r = new FileReader();
     r.onload = () => {

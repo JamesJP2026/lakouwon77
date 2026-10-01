@@ -112,12 +112,12 @@ export function diagnostic(c) {
   });
 
   const absents = ['facebook', 'instagram', 'tiktok'].filter(k => !plateformeActive(el[k]));
-  if (absents.length && absents.length < 3) add('opportunite', `Pas encore présent sur ${absents.map(k => PLATEFORMES.find(p => p.k === k).label).join(', ')}.`);
-  if (absents.length === 3) add('faiblesse', 'Aucune présence sur les réseaux sociaux : l\'entreprise est invisible pour une grande partie des clients.', {
+  if (absents.length && absents.length < 3) add('opportunite', `Aucune présence renseignée sur ${absents.map(k => PLATEFORMES.find(p => p.k === k).label).join(', ')} : à vérifier, sinon une piste pour toucher de nouveaux clients.`);
+  if (absents.length === 3) add('faiblesse', 'Aucune présence renseignée sur les réseaux sociaux (à vérifier) : sans réseaux, l\'entreprise est invisible pour une grande partie des clients.', {
     action: { canal: 'Facebook / Instagram', action: 'Création et animation des pages Facebook et Instagram' } });
 
   const g = el.google;
-  if (!plateformeActive(g)) add('opportunite', 'Pas de fiche Google : la créer (gratuit) permet d\'apparaître sur Google Maps et dans les recherches locales.', {
+  if (!plateformeActive(g)) add('opportunite', 'Aucune fiche Google renseignée : vérifier qu\'elle existe, sinon la créer (gratuit) pour apparaître sur Google Maps et dans les recherches locales.', {
     action: { canal: 'Site web / SEO', action: 'Création et optimisation de la fiche Google (Maps, horaires, photos, avis)' } });
   else if (num(g.note) > 0) {
     if (num(g.note) >= 4.5 && num(g.avis) >= 10) add('force', `Excellente réputation en ligne : ${String(g.note).replace('.', ',')}/5 sur ${nb(g.avis)} avis Google.`);
@@ -136,7 +136,7 @@ export function diagnostic(c) {
     if (num(app.note) > 0 && num(app.note) < 4) add('faiblesse', `Note de l'application : ${String(app.note).replace('.', ',')}/5 : corriger les points cités dans les avis et inviter les clients satisfaits à noter l'application.`, {
       action: { canal: 'Application mobile', action: 'Amélioration de la note de l\'application (réponses aux avis, demande d\'avis après livraison)' } });
   }
-  if (!plateformeActive(el.site)) add('opportunite', 'Pas de site web : une page simple ou un catalogue en ligne renforcerait la crédibilité.');
+  if (!plateformeActive(el.site)) add('opportunite', 'Aucun site web renseigné : à vérifier ; une page simple ou un catalogue en ligne renforcerait la crédibilité.');
 
   const contacts = num(el.whatsapp.contacts) + num(f.bases.contactsClients);
   if (contacts >= 100) add('force', `Base de ${nb(contacts)} contacts clients déjà accumulée.`, {
@@ -151,7 +151,9 @@ export function diagnostic(c) {
   if (rempli(f.concurrence.avantage)) add('force', `Atout distinctif : ${f.concurrence.avantage.split('\n')[0]}`);
   if (rempli(f.concurrence.problemes)) f.concurrence.problemes.split('\n').filter(rempli).slice(0, 3)
     .forEach(pb => add('faiblesse', pb.trim()));
-  const manque = Object.keys(SUPPORTS).filter(k => ['logo', 'photos'].includes(k) && !f.moyens.supports[k]);
+  // Seulement si la partie « Moyens » a été remplie : sinon on ne sait pas.
+  const moyensRenseignes = rempli(f.moyens.budgetMensuel) || rempli(f.moyens.gestionnaire) || Object.values(f.moyens.supports).some(Boolean);
+  const manque = moyensRenseignes ? Object.keys(SUPPORTS).filter(k => ['logo', 'photos'].includes(k) && !f.moyens.supports[k]) : [];
   if (manque.length) add('faiblesse', `Supports manquants : ${manque.map(k => SUPPORTS[k].toLowerCase()).join(', ')}.`, {
     action: { canal: 'Relations publiques', action: `Création des supports de base (${manque.map(k => SUPPORTS[k].toLowerCase()).join(', ')})` } });
   return out;
@@ -174,9 +176,8 @@ export function texteContexte(c) {
   if (w?.resume) l.push(`D'après les informations publiques : ${w.resume.trim()}`);
   const avis = c.fiche.bases.avisClients || w?.avis_clients;
   if (avis) l.push(`Ce que disent les clients : ${avis.trim()}`);
-  // Notes de recherche manuelles, sans les adresses des sources (inutiles dans une présentation).
-  const notes = String(c.fiche.recherche || '').split('\n').filter(x => x.trim() && !/^(- .*https?:\/\/|sources\s*:)/i.test(x.trim())).join(' ');
-  if (notes) l.push(`Observations en ligne : ${notes}`);
+  // Les notes de recherche de l'agence (points à vérifier, sources…) restent internes : elles
+  // sont transmises à l'IA (texteWebIA) mais pas reprises dans le texte présenté au client.
   return l.join('\n');
 }
 

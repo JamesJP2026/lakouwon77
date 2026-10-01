@@ -1,0 +1,195 @@
+{
+  "type": "fiche-entreprise",
+  "version": 1,
+  "client": {
+    "id": "welj",
+    "nom": "WELJ Express Services",
+    "secteur": "logistique",
+    "taille": "",
+    "contact": "",
+    "telephone": "",
+    "email": "",
+    "nif": "",
+    "adresse": "Port-au-Prince, Haïti",
+    "siteWeb": "https://welj-ht.com/",
+    "fiche": {
+      "activite": {
+        "description": "Service d'envoi et de livraison de colis entre Miami, New York, la République dominicaine et Haïti.",
+        "produits": "Envoi de colis (États-Unis et République dominicaine vers Haïti), livraison, application mobile Android, espace client en ligne",
+        "prix": "",
+        "anciennete": "",
+        "employes": "",
+        "zone": "Miami, New York, République dominicaine, Port-au-Prince ; nouvelle succursale à Jérémie (annoncée sur TikTok)",
+        "ca": "",
+        "saisonnalite": ""
+      },
+      "clientele": {
+        "profil": "Particuliers (notamment la diaspora haïtienne aux États-Unis) et entreprises qui expédient des marchandises vers Haïti.",
+        "decouverte": [],
+        "clientsMois": "",
+        "fideles": ""
+      },
+      "concurrence": {
+        "concurrents": "",
+        "avantage": "",
+        "problemes": ""
+      },
+      "enLigne": {
+        "facebook": {
+          "url": "https://www.facebook.com/weljexpressservices/",
+          "abonnes": "",
+          "pubsMois": "",
+          "interactions": ""
+        },
+        "instagram": {
+          "url": "https://www.instagram.com/weljexpress/",
+          "abonnes": "",
+          "pubsMois": "",
+          "interactions": ""
+        },
+        "tiktok": {
+          "url": "https://www.tiktok.com/discover/welj-express-services",
+          "abonnes": "",
+          "pubsMois": "",
+          "interactions": ""
+        },
+        "youtube": {
+          "url": "",
+          "abonnes": "",
+          "pubsMois": "",
+          "interactions": ""
+        },
+        "linkedin": {
+          "url": "",
+          "abonnes": "",
+          "pubsMois": "",
+          "interactions": ""
+        },
+        "google": {
+          "url": "",
+          "note": "",
+          "avis": ""
+        },
+        "site": {
+          "url": "https://welj-ht.com/",
+          "visites": ""
+        },
+        "whatsapp": {
+          "url": "",
+          "contacts": ""
+        },
+        "appli": {
+          "url": "https://play.google.com/store/apps/details?id=com.welj.welj_flutter_user",
+          "telechargements": "",
+          "note": "",
+          "avis": ""
+        }
+      },
+      "bases": {
+        "contactsClients": "",
+        "emails": "",
+        "avisClients": "",
+        "meilleuresPubs": ""
+      },
+      "moyens": {
+        "budgetMensuel": "",
+        "gestionnaire": "",
+        "supports": {}
+      },
+      "recherche": "Vérifié le 01/10/2026 (sources publiques) : application Android « WELJ » sur Google Play ; site welj-ht.com avec espace client (connexion) ; pages Facebook et Instagram (@weljexpress) ; présence sur TikTok (succursale de Jérémie annoncée ; lien = page publique TikTok sur WELJ, compte exact à préciser).\nÀ VÉRIFIER : le suivi des colis dans l'application n'est pas confirmé par les sources accessibles (vérifier la page Google Play ou demander au client). Chiffres non visibles : abonnés Facebook / Instagram / TikTok, téléchargements, note et avis de l'application.",
+      "majLe": "",
+      "web": {
+        "date": "2026-10-01",
+        "donnees": {
+          "entreprise_trouvee": true,
+          "resume": "WELJ Express Services, basée à Port-au-Prince, propose l'envoi et la livraison de colis entre Miami, New York, la République dominicaine et Haïti, avec une application mobile Android et un espace client sur son site.",
+          "activite": {
+            "description": "Service d'envoi et de livraison de colis entre Miami, New York, la République dominicaine et Haïti.",
+            "produits": "Envoi de colis (États-Unis et République dominicaine vers Haïti), livraison, application mobile Android, espace client en ligne",
+            "prix": "",
+            "anciennete": "",
+            "zone": "Miami, New York, République dominicaine, Port-au-Prince ; nouvelle succursale à Jérémie (annoncée sur TikTok)"
+          },
+          "clientele": "Particuliers (notamment la diaspora haïtienne aux États-Unis) et entreprises qui expédient des marchandises vers Haïti.",
+          "concurrents": "",
+          "avantage": "",
+          "avis_clients": "",
+          "en_ligne": {
+            "facebook": {
+              "url": "https://www.facebook.com/weljexpressservices/",
+              "abonnes": null,
+              "pubsMois": null,
+              "interactions": null
+            },
+            "instagram": {
+              "url": "https://www.instagram.com/weljexpress/",
+              "abonnes": null,
+              "pubsMois": null,
+              "interactions": null
+            },
+            "tiktok": {
+              "url": "https://www.tiktok.com/discover/welj-express-services",
+              "abonnes": null,
+              "pubsMois": null,
+              "interactions": null
+            },
+            "youtube": {
+              "url": "",
+              "abonnes": null,
+              "pubsMois": null,
+              "interactions": null
+            },
+            "linkedin": {
+              "url": "",
+              "abonnes": null,
+              "pubsMois": null,
+              "interactions": null
+            },
+            "google": {
+              "url": "",
+              "note": null,
+              "avis": null
+            },
+            "site": {
+              "url": "https://welj-ht.com/",
+              "visites": null
+            },
+            "whatsapp": {
+              "url": "",
+              "contacts": null
+            },
+            "appli": {
+              "url": "https://play.google.com/store/apps/details?id=com.welj.welj_flutter_user",
+              "telechargements": null,
+              "note": null,
+              "avis": null
+            }
+          },
+          "sources": [
+            {
+              "titre": "WELJ – Google Play",
+              "url": "https://play.google.com/store/apps/details?id=com.welj.welj_flutter_user"
+            },
+            {
+              "titre": "WELJ Express Services (site)",
+              "url": "https://welj-ht.com/"
+            },
+            {
+              "titre": "WELJ Express Services – Facebook",
+              "url": "https://www.facebook.com/weljexpressservices/"
+            },
+            {
+              "titre": "WELJ Express Services – Instagram",
+              "url": "https://www.instagram.com/weljexpress/"
+            },
+            {
+              "titre": "Welj Express Services – TikTok",
+              "url": "https://www.tiktok.com/discover/welj-express-services"
+            }
+          ],
+          "remarques": "Le suivi des colis dans l'application n'est pas confirmé par les sources publiques accessibles : à vérifier avant de le mettre en avant. Le compte TikTok n'a pas été identifié précisément. Aucun chiffre d'audience (abonnés, téléchargements, note) n'était visible."
+        }
+      }
+    }
+  }
+}

@@ -69,6 +69,15 @@ automatiquement ; dans un plan existant, le bouton « Importer la fiche »
 ajoute les nouvelles informations sans rien effacer ni dupliquer. La
 présentation affiche la présence en ligne actuelle du client.
 
+### Importer / exporter une fiche entreprise
+
+« ⇩ Exporter la fiche » (page de la fiche) produit un fichier JSON ;
+« ⇧ Importer une fiche » (liste des entreprises) l'ajoute à l'application
+sans toucher aux autres données. Si l'entreprise existe déjà, la fiche
+existante est complétée (champs vides seulement). Exemple :
+`exemples/fiche-welj-express-services.json` (informations publiques
+vérifiées le 01/10/2026, points non confirmés signalés).
+
 ### Recherche automatique par IA (facultatif)
 
 Le bouton **« Rechercher avec l'IA »** de la fiche fait chercher l'entreprise
