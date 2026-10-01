@@ -4,10 +4,12 @@ import {
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
+import { STATUTS_PUB, nouvellePublication, grilleMois, moisDecale, libelleMois, abregeCanal } from './calendrier.js';
 import { FREQUENCES, dateSuivante, genererRecurrentes, relancesAFaire } from './facturation.js';
-import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema as S } from './ia.js';
+import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema } from './ia.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
+const S = schema; // constructeurs de schémas JSON pour les réponses de l'IA
 let data = load();
 data.plans.forEach(normaliserPlan);
 data.clients.forEach(normaliserFiche);
@@ -154,6 +156,8 @@ function viewDashboard() {
   const recents = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || '')).slice(0, 6);
   const semaine = addDays(todayISO(), 7);
   const relances = relancesAFaire(data.factures);
+  const pubsAVenir = data.plans.filter(p => p.statut !== 'refuse').flatMap(p => (p.publications || []).map(x => ({ x, p })))
+    .filter(({ x }) => x.statut !== 'publie' && x.date >= todayISO() && x.date <= semaine).sort((a, b) => a.x.date.localeCompare(b.x.date));
   const aValider = data.factures.filter(f => f.recurrenteDe && f.statut === 'brouillon');
   const aSuivre = toutesActions().filter(({ a, p }) => a.statut !== 'termine' &&
     (actionEnRetard(a, p) || (a.statut === 'a_faire' && (a.debut || p.debut) <= semaine)));
@@ -182,6 +186,9 @@ function viewDashboard() {
       ${aValider.length ? `<div class="panel"><h3>Factures récurrentes à valider</h3><table><tbody>${aValider.map(f => `<tr class="rowlink" data-href="#/facture/${f.id}">
         <td><b>${esc(f.numero)}</b> ↻<div class="muted">${esc(f.objet)}</div></td><td>${esc(clientById(f.clientId)?.nom || '')}</td><td class="r num">${money(totauxFacture(f).total)}</td></tr>`).join('')}</tbody></table></div>` : ''}
     </div>` : ''}
+    ${pubsAVenir.length ? `<div class="panel"><h3>Publications des 7 prochains jours</h3><table><tbody>${pubsAVenir.slice(0, 10).map(({ x, p }) => `<tr class="rowlink" data-href="#/plan/${p.id}/calendrier">
+      <td class="nowrap">${dateCourte(x.date)}</td><td><b>${esc(x.canal)}</b> — ${esc(x.titre || x.texte.slice(0, 50))}<div class="muted">${esc(clientById(p.clientId)?.nom || '')}</div></td>
+      <td class="r"><span class="pub-chip pst-${x.statut}">${STATUTS_PUB[x.statut]}</span></td></tr>`).join('')}</tbody></table></div>` : ''}
     ${aSuivre.length ? `<div class="panel"><h3>Actions à suivre <span class="n">en retard ou à lancer cette semaine</span></h3>
       <table><tbody>${aSuivre.slice(0, 8).map(({ a, p }) => `<tr class="rowlink" data-href="#/actions">
         <td><b>${esc(a.canal)}</b> — ${esc(a.action)}<div class="muted">${esc(p.titre)} · ${esc(clientById(p.clientId)?.nom || '')}</div></td>
@@ -364,6 +371,12 @@ let rechercheEnCours = null;
 
 const IA_ETAPE = { infos: 'resume', analyse: 'analyse', objectifs: 'objectifs', cibles: 'cibles', strategie: 'strategie', actions: 'actions', suivi: 'suivi', resultats: 'bilan' };
 const usd = n => n.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' });
+
+function demanderCleSansFermer() {
+  if (data.settings.cleApi) return true;
+  toast('Ajoutez votre clé API dans Paramètres → Recherche par IA pour utiliser l\'IA.', 'err');
+  return false;
+}
 
 function demanderCle() {
   if (data.settings.cleApi) return true;
@@ -607,6 +620,7 @@ const STEPS = [
   ['cibles', 'Cibles'],
   ['strategie', 'Stratégie & message'],
   ['actions', 'Actions & budget'],
+  ['calendrier', 'Calendrier de publication'],
   ['suivi', 'Suivi & KPIs'],
   ['honoraires', 'Honoraires'],
   ['resultats', 'Résultats & pilotage'],
@@ -706,6 +720,7 @@ function stepContent(p, step) {
       ${num(p.budgetPrevu) > 0 && p.actions.length ? `<button class="btn btn-sm" data-action="repartir-budget">⚖ Répartir le budget envisagé (${money(p.budgetPrevu)}) entre les actions</button>` : ''}</div>
       ${chips('actions', sug.actions, a => `${a.canal} : ${a.action}`)}`;
     }
+    case 'calendrier': return vueCalendrier(p);
     case 'suivi': return `
       <div class="form-grid">
         ${field('Indicateurs de performance (KPIs)', area('kpis', p.kpis, 'Un indicateur par ligne', 5), 'full')}
@@ -788,6 +803,113 @@ function ficheHint(c) {
     <a class="btn btn-sm" href="#/client/${c.id}">${pct < 100 ? 'Compléter la fiche' : 'Voir la fiche'}</a>
     ${pct ? '<button class="btn btn-sm btn-primary" data-action="importer-fiche">⇩ Importer la fiche et le diagnostic dans ce plan</button>' : ''}
     <span class="muted">Contexte, constats SWOT, cibles, actions et objectifs sont ajoutés sans effacer votre travail.</span></div>`;
+}
+
+// ---------- Calendrier de publication ----------
+const calMois = {}; // mois affiché par plan
+const calFiltre = { statut: '', canal: '' };
+
+function vueCalendrier(p) {
+  const mois = calMois[p.id] || (p.publications.map(x => x.date).filter(d => d >= todayISO()).sort()[0] || (todayISO() > p.debut ? todayISO() : p.debut)).slice(0, 7);
+  calMois[p.id] = mois;
+  const pubs = p.publications.filter(x => (!calFiltre.statut || x.statut === calFiltre.statut) && (!calFiltre.canal || x.canal === calFiltre.canal));
+  const parJour = {};
+  pubs.forEach(x => { (parJour[x.date] = parJour[x.date] || []).push(x); });
+  const canaux = [...new Set(p.publications.map(x => x.canal).filter(Boolean))];
+  const compte = st => p.publications.filter(x => x.statut === st).length;
+  return `
+    <p class="muted">Découpez les actions en publications concrètes : date, réseau, texte et visuel. Glissez une publication sur un autre jour pour la déplacer.</p>
+    <div class="cal-stats">${Object.entries(STATUTS_PUB).map(([k, l]) => `<span class="pub-chip pst-${k}">${l} : ${compte(k)}</span>`).join('')}</div>
+    <div class="cal-bar">
+      <div class="row-btns"><button class="btn btn-sm" data-action="cal-mois" data-delta="-1">◀</button><b class="cal-titre">${libelleMois(mois)}</b><button class="btn btn-sm" data-action="cal-mois" data-delta="1">▶</button></div>
+      <div class="row-btns">
+        <select data-cal-filtre="statut"><option value="">Tous les statuts</option>${Object.entries(STATUTS_PUB).map(([k, l]) => `<option value="${k}" ${calFiltre.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <select data-cal-filtre="canal"><option value="">Tous les réseaux</option>${canaux.map(c => `<option ${calFiltre.canal === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <button class="btn btn-sm btn-ia" data-action="ia-calendrier">✨ Proposer les publications du mois</button>
+        <button class="btn btn-sm" data-action="cal-imprimer">🖨 Calendrier à valider</button>
+      </div>
+    </div>
+    <div class="cal-grid">
+      ${['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(j => `<div class="cal-head">${j}</div>`).join('')}
+      ${grilleMois(mois).flat().map(j => `<div class="cal-day ${j.dansMois ? '' : 'hors'} ${j.date === todayISO() ? 'today' : ''} ${j.date < p.debut || j.date > p.fin ? 'hors-plan' : ''}" data-date="${j.date}">
+        <div class="cal-num"><span>${j.jour}</span><button class="cal-add" data-action="pub-nouvelle" data-date="${j.date}" title="Ajouter une publication">+</button></div>
+        ${(parJour[j.date] || []).map(x => `<div class="pub-chip pst-${x.statut}" draggable="true" data-pub="${x.id}" data-action="pub-ouvrir" data-pid="${x.id}" title="${esc(x.titre || x.texte)}"><b>${esc(abregeCanal(x.canal))}</b> ${esc(x.titre || x.texte.slice(0, 30) || 'Sans titre')}</div>`).join('')}
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-sm" data-action="pub-nouvelle" data-date="">+ Ajouter une publication</button>`;
+}
+
+function modalPublication(p, pub) {
+  const neuve = !p.publications.some(x => x.id === pub.id);
+  openModal(`<h2>${neuve ? 'Nouvelle publication' : 'Publication'}</h2>
+    <form data-form="publication" data-plan="${p.id}" data-id="${pub.id}">
+      <datalist id="canaux-pub">${CANAUX.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <div class="form-grid">
+        <label>Date *<input type="date" name="date" value="${esc(pub.date)}" required></label>
+        <label>Réseau / canal *<input name="canal" list="canaux-pub" value="${esc(pub.canal)}" required></label>
+        <label class="full">Titre (pour le calendrier)<input name="titre" value="${esc(pub.titre)}" placeholder="Ex. : Promo de la semaine"></label>
+        <label class="full">Texte de la publication<textarea name="texte" rows="6">${esc(pub.texte)}</textarea></label>
+        <label class="full">Visuel à prévoir<input name="visuel" value="${esc(pub.visuel)}" placeholder="Photo, vidéo courte, carrousel… et ce qu'elle montre"></label>
+        <label>Hashtags<input name="hashtags" value="${esc(pub.hashtags)}"></label>
+        <label>Statut<select name="statut">${Object.entries(STATUTS_PUB).map(([k, l]) => `<option value="${k}" ${pub.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="full">Commentaire du client / remarques<input name="commentaire" value="${esc(pub.commentaire)}"></label>
+      </div>
+      <div class="modal-actions wrap">
+        ${neuve ? '' : `<button type="button" class="btn btn-danger" data-action="pub-suppr" data-pid="${pub.id}">Supprimer</button>`}
+        <button type="button" class="btn btn-ia" data-action="pub-ia">✨ Rédiger avec l'IA</button>
+        <button type="button" class="btn" data-action="pub-copier">Copier le texte</button>
+        <button type="button" class="btn" data-action="close-modal">Annuler</button>
+        <button type="button" class="btn btn-primary" data-action="submit-form">Enregistrer</button>
+      </div>
+    </form>`, true);
+}
+
+async function redigerPublication(p) {
+  if (!demanderCleSansFermer()) return;
+  const form = $modal.querySelector('form[data-form="publication"]');
+  const btn = form.querySelector('[data-action="pub-ia"]');
+  const fd = Object.fromEntries(new FormData(form));
+  btn.disabled = true; btn.textContent = '✨ Rédaction…';
+  try {
+    const { donnees: d, cout } = await genererLibre(data.settings.cleApi,
+      `Rédige une publication pour ${fd.canal || 'les réseaux sociaux'}, prévue le ${fd.date || 'prochainement'}${fd.titre ? `, sur le thème « ${fd.titre} »` : ''}${fd.texte ? `. Brouillon existant à améliorer : « ${fd.texte} »` : ''}. Respecte le ton et le message clé du plan ; texte prêt à publier, avec un appel à l'action.`,
+      contexteIA(p), { titre: S.texte('Titre court pour le calendrier.'), texte: S.texte('Texte complet de la publication.'), visuel: S.texte('Visuel à prévoir.'), hashtags: S.texte('Hashtags séparés par des espaces.') }, undefined, 'low');
+    ['titre', 'texte', 'visuel', 'hashtags'].forEach(k => { if (d[k] && (k === 'texte' || !form.elements[k].value.trim())) form.elements[k].value = d[k]; });
+    toast(`Texte rédigé (coût estimé ${usd(cout)}). Relisez puis enregistrez.`);
+  } catch (e) { toast(e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '✨ Rédiger avec l\'IA'; }
+}
+
+async function proposerCalendrier(p) {
+  if (!demanderCle()) return;
+  const mois = calMois[p.id];
+  const debut = `${mois}-01`, fin = moisDecale(mois, 1) + '-01';
+  const res = await avecProgression(`Préparation des publications de ${libelleMois(mois)}…`, signal => genererLibre(data.settings.cleApi,
+    `Propose le calendrier de publication du mois de ${libelleMois(mois)} (dates de ${debut} inclus à ${fin} exclu, dans la période du plan), en déclinant les actions du plan sur les réseaux concernés : 8 à 16 publications réparties dans le mois, variées (promotion, conseil, témoignage, coulisses…), avec le texte prêt à publier.`,
+    contexteIA(p), { publications: S.liste('Publications du mois.', S.objet({ date: S.texte('Date AAAA-MM-JJ.'), canal: S.texte('Réseau ou canal.'), titre: S.texte('Titre court.'), texte: S.texte('Texte complet.'), visuel: S.texte('Visuel à prévoir.'), hashtags: S.texte('Hashtags.') })) }, signal));
+  if (!res) return;
+  const pubs = res.donnees.publications.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.date));
+  propositionCal = { planId: p.id, pubs };
+  openModal(`<h2>${pubs.length} publications proposées</h2>
+    <div class="ia-apercu">${pubs.map((x, i) => `<label class="check pub-prop"><input type="checkbox" name="pub" value="${i}" checked>
+      <span><b>${dateCourte(x.date)} · ${esc(x.canal)}</b> — ${esc(x.titre)}<span class="muted">${esc(x.texte)}</span></span></label>`).join('')}</div>
+    <p class="muted">Coût estimé : ${usd(res.cout)}. Les publications sont ajoutées au statut « Brouillon ».</p>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Ignorer</button><button type="button" class="btn btn-primary" data-action="ia-cal-ajouter">Ajouter la sélection</button></div>`, true);
+}
+let propositionCal = null;
+
+function imprimerCalendrier(p) {
+  const mois = calMois[p.id];
+  const pubs = p.publications.filter(x => x.date.startsWith(mois)).sort((a, b) => a.date.localeCompare(b.date));
+  const c = clientById(p.clientId) || {};
+  const w = document.getElementById('print-zone');
+  w.innerHTML = `<article class="doc"><h1 class="print-title">Calendrier de publication — ${libelleMois(mois)}</h1>
+    <p>${esc(c.nom || '')} · ${esc(p.titre)}</p>
+    <table class="doc-table"><thead><tr><th>Date</th><th>Réseau</th><th>Publication</th><th>Visuel</th><th>Validation client</th></tr></thead>
+    <tbody>${pubs.map(x => `<tr><td class="nowrap">${dateCourte(x.date)}</td><td>${esc(x.canal)}</td><td><b>${esc(x.titre)}</b><div>${nl2br(x.texte)}</div><div class="muted">${esc(x.hashtags)}</div></td><td>${esc(x.visuel)}</td><td>☐ OK ☐ À modifier<div class="muted">${esc(x.commentaire)}</div></td></tr>`).join('') || '<tr><td colspan="5">Aucune publication ce mois-ci.</td></tr>'}</tbody></table></article>`;
+  document.body.classList.add('print-zone-on');
+  window.print();
+  setTimeout(() => { document.body.classList.remove('print-zone-on'); w.innerHTML = ''; }, 500);
 }
 
 function ecartBudget(p) {
@@ -1447,6 +1569,26 @@ document.addEventListener('click', e => {
     case 'ia-lancer': lancerRechercheIA(clientById(id), $modal.querySelector('[name=remplacer]')?.checked); break;
     case 'ia-annuler': rechercheEnCours?.abort(); break;
     case 'ia-section': proposerSection(p, el.dataset.section); break;
+    case 'cal-mois': calMois[p.id] = moisDecale(calMois[p.id], +el.dataset.delta); rerenderKeepScroll(); break;
+    case 'pub-nouvelle': modalPublication(p, nouvellePublication({ date: el.dataset.date || todayISO(), statut: 'brouillon' })); break;
+    case 'pub-ouvrir': { const pub = p.publications.find(x => x.id === el.dataset.pid); if (pub) modalPublication(p, pub); break; }
+    case 'pub-suppr': askConfirm('Supprimer cette publication ?', () => { p.publications = p.publications.filter(x => x.id !== el.dataset.pid); persist(true); rerenderKeepScroll(); }, 'Supprimer'); break;
+    case 'pub-ia': redigerPublication(p); break;
+    case 'pub-copier': {
+      const form = el.closest('form');
+      const txt = [form.elements.texte.value, form.elements.hashtags.value].filter(Boolean).join('\n\n');
+      (navigator.clipboard?.writeText(txt) || Promise.reject()).then(() => toast('Texte copié : collez-le dans le réseau social.')).catch(() => { form.elements.texte.select(); toast('Texte sélectionné : faites Ctrl+C.'); });
+      break;
+    }
+    case 'ia-calendrier': proposerCalendrier(p); break;
+    case 'ia-cal-ajouter': {
+      if (!propositionCal || propositionCal.planId !== p.id) break;
+      const choix = [...$modal.querySelectorAll('input[name=pub]:checked')].map(i => propositionCal.pubs[+i.value]);
+      choix.forEach(x => p.publications.push(nouvellePublication({ ...x, statut: 'brouillon' })));
+      propositionCal = null; persist(true); closeModal(); rerenderKeepScroll(); toast(`${choix.length} publication(s) ajoutée(s) au calendrier.`);
+      break;
+    }
+    case 'cal-imprimer': imprimerCalendrier(p); break;
     case 'sig-vider': { const cv = document.getElementById('sig-pad'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); delete cv.dataset.vide; break; }
     case 'sig-valider': {
       const cv = document.getElementById('sig-pad');
@@ -1568,6 +1710,13 @@ function handleForm(form) {
     if (!fd.honoraires && !fd.media) { toast('Cochez au moins un élément à facturer.', 'err'); return; }
     const f = creerFacture(planById(form.dataset.id), { honoraires: !!fd.honoraires, media: !!fd.media, mediaDetail: !!fd.mediaDetail, type: fd.type, acomptePct: fd.acomptePct, date: fd.date, delai: fd.delai });
     closeModal(); go(`#/facture/${f.id}`); toast(`Facture ${f.numero} créée (brouillon).`);
+  } else if (kind === 'publication') {
+    const p = planById(form.dataset.plan);
+    const champs = { date: fd.date, canal: fd.canal.trim(), titre: fd.titre.trim(), texte: fd.texte, visuel: fd.visuel, hashtags: fd.hashtags, statut: fd.statut, commentaire: fd.commentaire };
+    const pub = p.publications.find(x => x.id === form.dataset.id);
+    if (pub) Object.assign(pub, champs); else p.publications.push(nouvellePublication({ ...champs, id: form.dataset.id }));
+    calMois[p.id] = fd.date.slice(0, 7);
+    persist(true); closeModal(); rerenderKeepScroll(); toast('Publication enregistrée.');
   } else if (kind === 'recurrence') {
     const f = factureById(form.dataset.id);
     f.recurrence = { actif: !!fd.actif, frequence: fd.frequence, prochaine: fd.prochaine, fin: fd.fin, objet: fd.objet.trim() || f.objet };
@@ -1631,6 +1780,7 @@ document.addEventListener('input', onInput);
 document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.bind === 'clientId') { onInput(e); return; }
+  if (el.dataset.calFiltre) { calFiltre[el.dataset.calFiltre] = el.value; rerenderKeepScroll(); return; }
   const a = el.dataset.actionChange;
   if (a === 'action-statut') {
     planById(el.dataset.plan).actions[+el.dataset.i].statut = el.value;
@@ -1661,6 +1811,18 @@ document.addEventListener('change', e => {
     };
     r.readAsText(el.files[0]);
   }
+});
+
+// Glisser-déposer des publications dans le calendrier.
+document.addEventListener('dragstart', e => { const c = e.target.closest?.('[data-pub]'); if (c) e.dataTransfer.setData('text/plain', c.dataset.pub); });
+document.addEventListener('dragover', e => { if (e.target.closest?.('.cal-day')) e.preventDefault(); });
+document.addEventListener('drop', e => {
+  const jour = e.target.closest?.('.cal-day');
+  const id = e.dataTransfer.getData('text/plain');
+  if (!jour || !id || !current.plan) return;
+  e.preventDefault();
+  const pub = current.plan.publications.find(x => x.id === id);
+  if (pub && pub.date !== jour.dataset.date) { pub.date = jour.dataset.date; persist(true); rerenderKeepScroll(); toast(`Publication déplacée au ${dateCourte(pub.date)}.`); }
 });
 
 document.addEventListener('keydown', e => {
