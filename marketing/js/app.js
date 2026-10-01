@@ -126,6 +126,7 @@ const NAV = [
   ['plans', '✎', 'Plans marketing'],
   ['actions', '☑', 'Suivi des actions'],
   ['factures', '▤', 'Factures'],
+  ['temps', '⏱', 'Temps & rentabilité'],
   ['parametres', '⚙', 'Paramètres'],
 ];
 
@@ -139,6 +140,7 @@ function renderShell(active) {
     <nav class="navlinks">
       ${NAV.map(([k, ic, l]) => `<a class="navlink ${active === k ? 'active' : ''}" href="#/${k}"><span class="ic">${ic}</span>${l}</a>`).join('')}
     </nav>
+    ${data.chrono ? `<a class="chrono-badge" href="#/temps">⏱ Chrono en cours</a>` : ''}
     <div class="sidebar-foot">Données enregistrées dans ce navigateur.<br>Pensez à exporter une sauvegarde.</div>`;
 }
 
@@ -745,6 +747,7 @@ function stepContent(p, step) {
         <tfoot><tr><td colspan="3" class="r"><b>Total honoraires HT</b></td><td class="r num"><b data-live="honTotal">${money(totalHonoraires(p))}</b></td><td></td></tr></tfoot>
       </table></div>
       <button class="btn btn-sm" data-action="add-row" data-list="honoraires">+ Ajouter une prestation</button>
+      ${(() => { const h = data.temps.filter(t => t.planId === p.id).reduce((s, t) => s + num(t.duree), 0); return h ? `<p class="hint">⏱ Temps déjà passé sur ce plan : <b>${heures(h)}</b>${num(data.settings.coutHoraire) ? ` (coût ${money(h * num(data.settings.coutHoraire))})` : ''}. <a href="#/temps">Voir le détail</a></p>` : ''; })()}
       ${(data.settings.catalogue || []).length ? `<div class="chips"><span class="muted">Catalogue :</span>${data.settings.catalogue.map((c, i) =>
         `<button class="chip" data-action="add-catalogue" data-i="${i}">+ ${esc(c.description)}${num(c.pu) ? ` · ${money(c.pu)}` : ''}</button>`).join('')}
         <a class="muted" href="#/parametres">Modifier le catalogue</a></div>` : ''}
@@ -1358,6 +1361,83 @@ function creerFacture(p, opts) {
   return f;
 }
 
+// ---------- Temps passé et rentabilité ----------
+const filtreTemps = { client: '', mois: '' };
+const heures = n => `${(Math.round(num(n) * 100) / 100).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
+const dureeChrono = () => data.chrono ? (Date.now() - data.chrono.debut) / 3600000 : 0;
+
+// Honoraires facturés HT (hors achat média refacturé) et encaissements, par client.
+function rentabiliteParClient() {
+  const cout = num(data.settings.coutHoraire);
+  return data.clients.map(c => {
+    const facts = data.factures.filter(f => f.clientId === c.id && !['brouillon', 'annulee'].includes(f.statut));
+    const honoraires = facts.reduce((s, f) => s + f.lignes.filter(l => !/^achat média/i.test(l.description)).reduce((t, l) => t + num(l.qte) * num(l.pu), 0) * (1 - num(f.remisePct) / 100), 0);
+    const encaisse = facts.reduce((s, f) => s + totauxFacture(f).paye, 0);
+    const h = data.temps.filter(t => t.clientId === c.id).reduce((s, t) => s + num(t.duree), 0);
+    return { c, honoraires, encaisse, h, coutTemps: h * cout, marge: honoraires - h * cout, tauxReel: h ? honoraires / h : 0 };
+  }).filter(r => r.h || r.honoraires).sort((a, b) => b.marge - a.marge);
+}
+
+function viewTemps() {
+  const f = filtreTemps;
+  const entrees = [...data.temps].sort((a, b) => b.date.localeCompare(a.date))
+    .filter(t => (!f.client || t.clientId === f.client) && (!f.mois || t.date.startsWith(f.mois)));
+  const total = entrees.reduce((s, t) => s + num(t.duree), 0);
+  const cout = num(data.settings.coutHoraire);
+  const rent = rentabiliteParClient();
+  const ch = data.chrono;
+  const plansDe = cid => data.plans.filter(p => !cid || p.clientId === cid);
+  return topbar('Temps & rentabilité', 'Le temps passé par client, comparé aux honoraires facturés',
+    `<button class="btn btn-primary" data-action="temps-ajouter">+ Saisir du temps</button>`) + `
+    <div class="panel chrono-panel">
+      ${ch ? `<div><b>⏱ Chrono en cours : <span data-live="chrono">${heures(Math.round(dureeChrono() * 100) / 100)}</span></b>
+          <div class="muted">${esc(clientById(ch.clientId)?.nom || '')}${ch.planId ? ' · ' + esc(planById(ch.planId)?.titre || '') : ''}${ch.description ? ' · ' + esc(ch.description) : ''}</div></div>
+          <button class="btn btn-danger" data-action="chrono-stop">■ Arrêter et enregistrer</button>`
+        : `<div class="form-grid chrono-form">
+          <label>Client<select id="chrono-client">${data.clients.map(c => `<option value="${c.id}">${esc(c.nom)}</option>`).join('')}</select></label>
+          <label>Plan (facultatif)<select id="chrono-plan"><option value="">—</option>${plansDe('').map(p => `<option value="${p.id}">${esc(p.titre)} — ${esc(clientById(p.clientId)?.nom || '')}</option>`).join('')}</select></label>
+          <label class="full">Tâche<input id="chrono-desc" placeholder="Ex. : création des visuels, réunion client…"></label>
+        </div><button class="btn btn-gold" data-action="chrono-start" ${data.clients.length ? '' : 'disabled'}>▶ Démarrer le chrono</button>`}
+    </div>
+    ${cout ? '' : '<p class="hint">Indiquez le coût d\'une heure de travail dans <a href="#/parametres">Paramètres</a> (Facturation) pour calculer la marge réelle par client.</p>'}
+    <div class="panel"><h3>Rentabilité par client</h3>
+      ${rent.length ? `<div class="table-wrap flat"><table>
+        <thead><tr><th>Client</th><th class="r">Honoraires facturés HT</th><th class="r">Encaissé</th><th class="r">Temps passé</th><th class="r">Coût du temps</th><th class="r">Marge</th><th class="r">Gain réel / heure</th></tr></thead>
+        <tbody>${rent.map(r => `<tr><td><b>${esc(r.c.nom)}</b></td><td class="r num">${money(r.honoraires)}</td><td class="r num">${money(r.encaisse)}</td>
+          <td class="r">${heures(r.h)}</td><td class="r num">${cout ? money(r.coutTemps) : '—'}</td>
+          <td class="r num ${cout && r.marge < 0 ? 'txt-red' : ''}"><b>${cout ? money(r.marge) : '—'}</b></td><td class="r num">${r.h ? money(r.tauxReel) : '—'}</td></tr>`).join('')}</tbody>
+      </table></div><p class="muted">Honoraires : lignes des factures émises, hors achat média refacturé, remise déduite. Gain réel / heure = honoraires ÷ heures passées.</p>`
+      : '<p class="muted">Saisissez du temps et émettez des factures pour voir la rentabilité de chaque client.</p>'}
+    </div>
+    <div class="panel"><h3>Temps saisi <span class="n">${heures(total)} au total</span></h3>
+      <div class="filters">
+        <select data-temps-filtre="client"><option value="">Tous les clients</option>${data.clients.map(c => `<option value="${c.id}" ${f.client === c.id ? 'selected' : ''}>${esc(c.nom)}</option>`).join('')}</select>
+        <input type="month" data-temps-filtre="mois" value="${esc(f.mois)}">
+      </div>
+      ${entrees.length ? `<div class="table-wrap flat"><table><thead><tr><th>Date</th><th>Client / plan</th><th>Tâche</th><th class="r">Durée</th><th></th></tr></thead>
+        <tbody>${entrees.map(t => `<tr><td class="nowrap">${dateCourte(t.date)}</td><td>${esc(clientById(t.clientId)?.nom || '—')}<div class="muted">${esc(planById(t.planId)?.titre || '')}</div></td>
+          <td>${esc(t.description)}</td><td class="r">${heures(num(t.duree))}</td>
+          <td class="r nowrap"><button class="btn btn-sm" data-action="temps-modifier" data-id="${t.id}">Modifier</button> <button class="btn btn-sm btn-danger" data-action="temps-suppr" data-id="${t.id}">✕</button></td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted">Aucun temps saisi pour ces filtres.</p>'}
+    </div>`;
+}
+
+function modalTemps(t) {
+  const neuf = !t;
+  t = t || { id: uid(), date: todayISO(), clientId: data.clients[0]?.id || '', planId: '', description: '', duree: 1 };
+  openModal(`<h2>${neuf ? 'Saisir du temps' : 'Modifier le temps'}</h2>
+    <form data-form="temps" data-id="${t.id}">
+      <div class="form-grid">
+        <label>Date<input type="date" name="date" value="${esc(t.date)}" required></label>
+        <label>Durée (heures)<input type="number" name="duree" min="0.25" step="0.25" value="${esc(t.duree)}" required></label>
+        <label>Client *<select name="clientId" required>${data.clients.map(c => `<option value="${c.id}" ${c.id === t.clientId ? 'selected' : ''}>${esc(c.nom)}</option>`).join('')}</select></label>
+        <label>Plan (facultatif)<select name="planId"><option value="">—</option>${data.plans.map(p => `<option value="${p.id}" ${p.id === t.planId ? 'selected' : ''}>${esc(p.titre)} — ${esc(clientById(p.clientId)?.nom || '')}</option>`).join('')}</select></label>
+        <label class="full">Tâche<input name="description" value="${esc(t.description)}"></label>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Enregistrer</button></div>
+    </form>`);
+}
+
 // ---------- Factures ----------
 const factureEnRetard = f => ['envoyee', 'partielle'].includes(f.statut) && f.echeance < todayISO();
 
@@ -1518,6 +1598,7 @@ function viewParametres() {
         ${sb('prefixeFacture', 'Préfixe des numéros de facture')}
         ${sb('prochainNumero', 'Prochain numéro', 'type="number" min="1" data-type="num"')}
         ${sb('delaiPaiement', 'Délai de paiement (jours)', 'type="number" min="0" data-type="num"')}
+        ${sb('coutHoraire', `Coût d'une heure de travail (${esc(s.devise)}) — pour la rentabilité`, 'type="number" min="0" step="any" data-type="num"')}
         <label class="full">Conditions de paiement par défaut<textarea data-sbind="conditions" rows="2">${esc(s.conditions)}</textarea></label>
         <label>MonCash (numéro)<input data-sbind="paiement.moncash" value="${esc(s.paiement?.moncash)}" placeholder="+509 …"></label>
         <label>NatCash (numéro)<input data-sbind="paiement.natcash" value="${esc(s.paiement?.natcash)}" placeholder="+509 …"></label>
@@ -1573,6 +1654,7 @@ function render() {
   }
   else if (route === 'actions') { data.plans.forEach(normaliserPlan); html = viewActions(); }
   else if (route === 'factures') html = viewFactures();
+  else if (route === 'temps') html = viewTemps();
   else if (route === 'facture' && factureById(id)) { nav = 'factures'; current.facture = factureById(id); html = viewFacture(current.facture); }
   else if (route === 'client' && clientById(id)) { nav = 'clients'; current.client = normaliserFiche(clientById(id)); html = viewFiche(current.client); }
   else if (route === 'parametres') html = viewParametres();
@@ -1692,6 +1774,22 @@ document.addEventListener('click', e => {
       break;
     }
     case 'cal-imprimer': imprimerCalendrier(p); break;
+    case 'temps-ajouter': if (!data.clients.length) { toast('Ajoutez d\'abord une entreprise cliente.', 'err'); break; } modalTemps(null); break;
+    case 'temps-modifier': modalTemps(data.temps.find(t => t.id === id)); break;
+    case 'temps-suppr': askConfirm('Supprimer ce temps ?', () => { data.temps = data.temps.filter(t => t.id !== id); persist(true); render(); }, 'Supprimer'); break;
+    case 'chrono-start': {
+      const planId = document.getElementById('chrono-plan').value;
+      data.chrono = { debut: Date.now(), clientId: planId ? planById(planId).clientId : document.getElementById('chrono-client').value, planId, description: document.getElementById('chrono-desc').value.trim() };
+      persist(true); render(); toast('Chrono démarré. Il continue même si vous changez de page ou fermez l\'application.');
+      break;
+    }
+    case 'chrono-stop': {
+      const ch = data.chrono;
+      const duree = Math.max(0.25, Math.round(dureeChrono() * 4) / 4);
+      data.temps.push({ id: uid(), date: todayISO(), clientId: ch.clientId, planId: ch.planId, description: ch.description || 'Travail', duree });
+      data.chrono = null; persist(true); render(); toast(`${heures(duree)} enregistrée(s) (arrondi au quart d'heure).`);
+      break;
+    }
     case 'modele-choisir':
       openModal(`<h2>Appliquer un modèle de campagne</h2>
         <form data-form="modele" data-id="${p.id}">
@@ -1857,6 +1955,11 @@ function handleForm(form) {
     const p = planById(form.dataset.id);
     const n = appliquerModele(p, fd.modele, !!fd.remplacer);
     persist(true); closeModal(); rerenderKeepScroll(); toast(`Modèle appliqué : ${n} actions ajoutées. Ajustez dates et budgets si besoin.`);
+  } else if (kind === 'temps') {
+    const champs = { date: fd.date, duree: num(fd.duree), clientId: fd.planId ? planById(fd.planId).clientId : fd.clientId, planId: fd.planId, description: fd.description.trim() };
+    const t = data.temps.find(x => x.id === form.dataset.id);
+    if (t) Object.assign(t, champs); else data.temps.push({ id: form.dataset.id, ...champs });
+    persist(true); closeModal(); render(); toast('Temps enregistré.');
   } else if (kind === 'publication') {
     const p = planById(form.dataset.plan);
     const champs = { date: fd.date, canal: fd.canal.trim(), titre: fd.titre.trim(), texte: fd.texte, visuel: fd.visuel, hashtags: fd.hashtags, statut: fd.statut, commentaire: fd.commentaire };
@@ -1938,6 +2041,7 @@ document.addEventListener('change', e => {
     if (m) { form.elements.motif.value = m.motif; form.elements.fin.value = addMonths(form.elements.debut.value, m.mois); }
     return;
   }
+  if (el.dataset.tempsFiltre) { filtreTemps[el.dataset.tempsFiltre] = el.value; render(); return; }
   if (el.dataset.calFiltre) { calFiltre[el.dataset.calFiltre] = el.value; rerenderKeepScroll(); return; }
   const a = el.dataset.actionChange;
   if (a === 'action-statut') {
@@ -1970,6 +2074,11 @@ document.addEventListener('change', e => {
     r.readAsText(el.files[0]);
   }
 });
+
+setInterval(() => {
+  const el = document.querySelector('[data-live="chrono"]');
+  if (el && data.chrono) el.textContent = heures(Math.round(dureeChrono() * 100) / 100);
+}, 30000);
 
 // Infobulle des graphiques (attribut data-tip).
 const bulle = document.createElement('div');

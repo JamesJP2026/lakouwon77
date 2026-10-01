@@ -12,6 +12,8 @@ export const defaultData = () => ({
     cleApi: '',
     // Moyens de paiement affichés sur les factures (et dans le QR code).
     paiement: { moncash: '', natcash: '', banque: '', lien: '' },
+    // Coût interne d'une heure de travail (salaires, charges), pour calculer la rentabilité.
+    coutHoraire: 0,
     // Prestations courantes, ajoutées en un clic dans les honoraires d'un plan.
     catalogue: [
       { description: 'Élaboration de la stratégie et du plan marketing', pu: 0 },
@@ -29,6 +31,8 @@ export const defaultData = () => ({
   clients: [],
   plans: [],
   factures: [],
+  temps: [],
+  chrono: null,
 });
 
 export function load() {

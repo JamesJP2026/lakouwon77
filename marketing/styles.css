@@ -314,6 +314,11 @@ input[data-cbind$=".url"]{min-width:190px;}
 .modele-opt{align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--line);}
 .modele-opt span .muted{display:block;}
 
+/* Temps passé */
+.chrono-panel{display:flex; justify-content:space-between; align-items:flex-end; gap:14px; flex-wrap:wrap;}
+.chrono-form{flex:1; min-width:280px;}
+.chrono-badge{margin:0 16px 10px; padding:8px 10px; border-radius:8px; background:var(--red-bg); color:var(--red); font-weight:700; font-size:12.5px; text-decoration:none; text-align:center;}
+
 /* Filtres */
 .filters{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
 .filters input{flex:1; min-width:200px;}
