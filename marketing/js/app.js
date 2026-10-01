@@ -5,6 +5,7 @@ import {
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
 import { histogramme } from './graphiques.js';
+import { MODELES, appliquerModele } from './modeles.js';
 import { STATUTS_PUB, nouvellePublication, grilleMois, moisDecale, libelleMois, abregeCanal } from './calendrier.js';
 import { FREQUENCES, dateSuivante, genererRecurrentes, relancesAFaire } from './facturation.js';
 import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema } from './ia.js';
@@ -78,7 +79,7 @@ const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
 const go = hash => { location.hash = hash; };
 
 // ---------- Modèle de plan ----------
-function nouveauPlan({ clientId, titre, motif = '', motifDetail = '', debut, fin, budgetPrevu, prefill }) {
+function nouveauPlan({ clientId, titre, motif = '', motifDetail = '', debut, fin, budgetPrevu, prefill, modele = '' }) {
   const client = clientById(clientId);
   const p = {
     id: uid(), clientId, titre, statut: 'brouillon', creeLe: todayISO(), datePresentation: '',
@@ -97,10 +98,10 @@ function nouveauPlan({ clientId, titre, motif = '', motifDetail = '', debut, fin
     notes: '',
   };
   normaliserPlan(p);
-  if (prefill && client) {
-    appliquerSuggestions(p, client.secteur, false);
-    if (completude(client) > 0) appliquerFiche(p, client, dureeMois(p));
-  }
+  if (prefill && client) appliquerSuggestions(p, client.secteur, false);
+  // Le modèle de campagne remplace les objectifs et actions génériques du secteur.
+  if (modele) appliquerModele(p, modele, true);
+  if (prefill && client && completude(client) > 0) appliquerFiche(p, client, dureeMois(p));
   return p;
 }
 
@@ -602,6 +603,7 @@ function modalNouveauPlan(clientId = '') {
       <div class="form-grid">
         <label class="full">Entreprise cliente *<select name="clientId" required>${data.clients.map(c => `<option value="${c.id}" ${c.id === clientId ? 'selected' : ''}>${esc(c.nom)} — ${esc(secteurLabel(c.secteur))}</option>`).join('')}</select></label>
         <label class="full">Titre du plan *<input name="titre" required value="Plan marketing ${new Date().getFullYear()}"></label>
+        <label class="full">Modèle de campagne (facultatif)<select name="modele"><option value="">— Aucun : plan libre —</option>${Object.entries(MODELES).map(([k, m]) => `<option value="${k}">${esc(m.label)} (${m.mois} mois)</option>`).join('')}</select></label>
         <label class="full">Motif du plan *<select name="motif" required>${motifOptions('')}</select></label>
         <label class="full">Précisez la raison du plan<textarea name="motifDetail" rows="2" placeholder="Ex. : l'entreprise ouvre une 2e boutique à Pétion-Ville en décembre et veut attirer une nouvelle clientèle."></textarea></label>
         <label>Début<input type="date" name="debut" value="${debut}" required></label>
@@ -652,7 +654,10 @@ function stepContent(p, step) {
       </div>
       <div class="hint">Secteur : <b>${esc(secteurLabel(client?.secteur))}</b>.
         <button class="btn btn-sm" data-action="prefill">✦ Remplir les champs vides avec des suggestions du secteur</button></div>
-      ${ficheHint(client)}`;
+      ${ficheHint(client)}
+      <div class="hint modele-hint">📋 Modèle de campagne${p.modele && MODELES[p.modele] ? ` : <b>${esc(MODELES[p.modele].label)}</b>` : ''}
+        <button class="btn btn-sm" data-action="modele-choisir">${p.modele ? 'Changer / ajouter un modèle' : 'Appliquer un modèle'}</button>
+        <span class="muted">Objectifs, actions datées et budget réparti selon le type de campagne.</span></div>`;
     case 'analyse': return `
       ${ficheHint(client)}
       <div class="form-grid">
@@ -1687,6 +1692,16 @@ document.addEventListener('click', e => {
       break;
     }
     case 'cal-imprimer': imprimerCalendrier(p); break;
+    case 'modele-choisir':
+      openModal(`<h2>Appliquer un modèle de campagne</h2>
+        <form data-form="modele" data-id="${p.id}">
+          <div class="modele-liste">${Object.entries(MODELES).map(([k, m], i) => `<label class="check modele-opt"><input type="radio" name="modele" value="${k}" ${i === 0 ? 'checked' : ''}>
+            <span><b>${esc(m.label)}</b><span class="muted">${m.actions.length} actions · ${m.objectifs.length} objectif(s) · durée conseillée ${m.mois} mois</span></span></label>`).join('')}</div>
+          <label class="check"><input type="checkbox" name="remplacer"> Remplacer les objectifs et actions actuels (sinon : ajouter)</label>
+          <p class="muted">Les actions sont placées dans la période du plan (${dateCourte(p.debut)} → ${dateCourte(p.fin)}) et le budget envisagé (${money(p.budgetPrevu)}) est réparti selon le modèle.</p>
+          <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Appliquer</button></div>
+        </form>`, true);
+      break;
     case 'releve-ajouter': {
       const r = nouveauReleve(p);
       if (p.releves.some(x => x.mois === r.mois)) { toast('Ce mois est déjà relevé.', 'err'); break; }
@@ -1838,6 +1853,10 @@ function handleForm(form) {
     if (!fd.honoraires && !fd.media) { toast('Cochez au moins un élément à facturer.', 'err'); return; }
     const f = creerFacture(planById(form.dataset.id), { honoraires: !!fd.honoraires, media: !!fd.media, mediaDetail: !!fd.mediaDetail, type: fd.type, acomptePct: fd.acomptePct, date: fd.date, delai: fd.delai });
     closeModal(); go(`#/facture/${f.id}`); toast(`Facture ${f.numero} créée (brouillon).`);
+  } else if (kind === 'modele') {
+    const p = planById(form.dataset.id);
+    const n = appliquerModele(p, fd.modele, !!fd.remplacer);
+    persist(true); closeModal(); rerenderKeepScroll(); toast(`Modèle appliqué : ${n} actions ajoutées. Ajustez dates et budgets si besoin.`);
   } else if (kind === 'publication') {
     const p = planById(form.dataset.plan);
     const champs = { date: fd.date, canal: fd.canal.trim(), titre: fd.titre.trim(), texte: fd.texte, visuel: fd.visuel, hashtags: fd.hashtags, statut: fd.statut, commentaire: fd.commentaire };
@@ -1913,6 +1932,12 @@ document.addEventListener('input', onInput);
 document.addEventListener('change', e => {
   const el = e.target;
   if (el.dataset.bind === 'clientId') { onInput(e); return; }
+  // Nouveau plan : le modèle choisi propose son motif et sa durée.
+  if (el.name === 'modele' && el.closest('form[data-form="plan"]')) {
+    const m = MODELES[el.value], form = el.form;
+    if (m) { form.elements.motif.value = m.motif; form.elements.fin.value = addMonths(form.elements.debut.value, m.mois); }
+    return;
+  }
   if (el.dataset.calFiltre) { calFiltre[el.dataset.calFiltre] = el.value; rerenderKeepScroll(); return; }
   const a = el.dataset.actionChange;
   if (a === 'action-statut') {
