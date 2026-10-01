@@ -928,6 +928,8 @@ function viewPresentation(p) {
       ${total > 0 ? `<tr><td colspan="3" class="r muted">Budget publicitaire (achat média, hors honoraires)</td><td class="r num muted">${money(total)}</td></tr>` : ''}</tfoot></table>
       ${para('', p.notes)}` : '')}
 
+    ${blocSignature(p, c)}
+
     <footer class="doc-foot">${esc(s.nom)}${s.adresse ? ` · ${esc(s.adresse)}` : ''}${s.telephone ? ` · ${esc(s.telephone)}` : ''}${s.email ? ` · ${esc(s.email)}` : ''}</footer>
   </article>`;
 }
@@ -951,6 +953,40 @@ function presenceEnLigne(c) {
     </tbody></table></div>`;
 }
 
+// Bon pour accord : signature à l'écran (doigt, stylet ou souris) ou sur papier.
+function blocSignature(p, c) {
+  const sig = p.signature;
+  return `<section class="doc-section signature-block">
+    <h2><span>✓</span>Bon pour accord</h2>
+    <p>Je soussigné(e), représentant ${esc(c.nom || 'l\'entreprise')}, accepte la proposition « ${esc(p.titre)} » et les honoraires de ${money(totalHonoraires(p))} HT décrits ci-dessus.</p>
+    ${sig ? `<div class="sig-done"><img src="${esc(sig.image)}" alt="Signature"><div><b>${esc(sig.nom)}</b>${sig.fonction ? `, ${esc(sig.fonction)}` : ''}<div class="muted">Signé le ${dateFr(sig.date)}</div></div></div>
+      <button class="btn btn-sm no-print" data-action="sig-effacer" data-id="${p.id}">Effacer la signature</button>`
+    : `<div class="no-print sig-pad-wrap">
+        <div class="form-grid">
+          <label>Nom du signataire<input id="sig-nom" value="${esc(c.contact || '')}"></label>
+          <label>Fonction<input id="sig-fonction" placeholder="Directeur, propriétaire…"></label>
+        </div>
+        <div class="lbl-like mt">Signature (au doigt sur téléphone ou tablette, ou à la souris)</div>
+        <canvas id="sig-pad" width="600" height="180"></canvas>
+        <div class="row-btns"><button class="btn btn-sm" data-action="sig-vider">Recommencer</button>
+          <button class="btn btn-primary" data-action="sig-valider" data-id="${p.id}">Valider la signature</button></div>
+      </div>
+      <div class="print-only sig-paper"><div>Nom et fonction : ______________________</div><div>Date : ____ / ____ / ________</div><div>Signature :</div></div>`}
+  </section>`;
+}
+
+function initSignature() {
+  const cv = document.getElementById('sig-pad');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#132340';
+  let dessine = false;
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+  cv.addEventListener('pointerdown', e => { dessine = true; cv.dataset.vide = 'non'; cv.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); });
+  cv.addEventListener('pointermove', e => { if (!dessine) return; ctx.lineTo(...pos(e)); ctx.stroke(); });
+  ['pointerup', 'pointercancel'].forEach(t => cv.addEventListener(t, () => { dessine = false; }));
+}
+
 function rapportResultats(p) {
   const r = resultats(p);
   const cellules = [
@@ -969,16 +1005,17 @@ function rapportResultats(p) {
     ${para('Bilan et prochaines étapes', p.bilan)}`;
 }
 
-function modalGenFacture(p) {
+function modalGenFacture(p, acompte = false) {
   const hon = totalHonoraires(p), med = budgetActions(p);
-  openModal(`<h2>Générer la facture</h2>
+  openModal(`<h2>${acompte ? 'Facture d\'acompte' : 'Générer la facture'}</h2>
+    ${acompte ? '<p class="hint">Proposition signée ✓ — facturez maintenant l\'acompte de démarrage.</p>' : ''}
     <form data-form="gen-facture" data-id="${p.id}">
       <p class="muted">Plan « ${esc(p.titre)} » — ${esc(clientById(p.clientId)?.nom || '')}</p>
       <label class="check"><input type="checkbox" name="honoraires" ${hon > 0 || !med ? 'checked' : ''}> Honoraires du plan (${money(hon)})</label>
       <label class="check"><input type="checkbox" name="media" ${med > 0 && !hon ? 'checked' : ''}> Budget des actions publicitaires (${money(med)})</label>
       <label class="check sub-opt"><input type="checkbox" name="mediaDetail" checked> Détailler le budget publicitaire action par action</label>
       <div class="form-grid" style="margin-top:12px">
-        <label>Type de facture<select name="type"><option value="complete">Facture complète</option><option value="acompte">Facture d'acompte</option></select></label>
+        <label>Type de facture<select name="type"><option value="complete">Facture complète</option><option value="acompte" ${acompte ? 'selected' : ''}>Facture d'acompte</option></select></label>
         <label>Pourcentage d'acompte<input type="number" name="acomptePct" min="1" max="100" value="50"></label>
         <label>Date<input type="date" name="date" value="${todayISO()}"></label>
         <label>Échéance (jours)<input type="number" name="delai" min="0" value="${num(data.settings.delaiPaiement)}"></label>
@@ -1233,6 +1270,7 @@ function render() {
   else { nav = 'dashboard'; html = viewDashboard(); }
   renderShell(nav);
   $view.innerHTML = html;
+  initSignature();
   document.body.classList.toggle('menu-open', false);
 }
 
@@ -1320,6 +1358,25 @@ document.addEventListener('click', e => {
     case 'ia-lancer': lancerRechercheIA(clientById(id), $modal.querySelector('[name=remplacer]')?.checked); break;
     case 'ia-annuler': rechercheEnCours?.abort(); break;
     case 'ia-section': proposerSection(p, el.dataset.section); break;
+    case 'sig-vider': { const cv = document.getElementById('sig-pad'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); delete cv.dataset.vide; break; }
+    case 'sig-valider': {
+      const cv = document.getElementById('sig-pad');
+      const nom = document.getElementById('sig-nom').value.trim();
+      if (!nom) { toast('Indiquez le nom du signataire.', 'err'); document.getElementById('sig-nom').focus(); break; }
+      if (cv.dataset.vide !== 'non') { toast('Le client doit signer dans le cadre.', 'err'); break; }
+      const pl = planById(id);
+      pl.signature = { image: cv.toDataURL('image/png'), nom, fonction: document.getElementById('sig-fonction').value.trim(), date: todayISO() };
+      pl.statut = 'accepte';
+      if (!pl.datePresentation) pl.datePresentation = todayISO();
+      persist(true); render();
+      if (totalHonoraires(pl) > 0) modalGenFacture(pl, true); else toast('Proposition signée et acceptée.');
+      break;
+    }
+    case 'sig-effacer':
+      askConfirm('Effacer la signature du client ? Le plan repassera au statut « Présenté ».', () => {
+        const pl = planById(id); delete pl.signature; pl.statut = 'presente'; persist(true); render();
+      }, 'Effacer');
+      break;
     case 'ia-appliquer': appliquerProposition(p, el.dataset.mode); break;
     case 'importer-fiche': {
       const c = clientById(p.clientId);
