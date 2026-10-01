@@ -3,8 +3,8 @@ import {
   dateFr, dateCourte, totauxFacture, budgetActions, totalHonoraires,
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
-import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche } from './fiche.js';
-import { rechercherEntreprise, fusionnerResultat } from './ia.js';
+import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
+import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema as S } from './ia.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
 let data = load();
@@ -349,6 +349,105 @@ function viewFiche(c) {
 
 // ---------- Recherche par IA ----------
 let rechercheEnCours = null;
+
+const IA_ETAPE = { infos: 'resume', analyse: 'analyse', objectifs: 'objectifs', cibles: 'cibles', strategie: 'strategie', actions: 'actions', suivi: 'suivi', resultats: 'bilan' };
+const usd = n => n.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' });
+
+function demanderCle() {
+  if (data.settings.cleApi) return true;
+  openModal(`<h2>IA non configurée</h2>
+    <p>Pour utiliser l'IA, ajoutez d'abord votre clé API Anthropic dans les Paramètres (partie « Recherche par IA »).</p>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button><a class="btn btn-primary" href="#/parametres">Aller aux Paramètres</a></div>`);
+  return false;
+}
+
+// Affiche une fenêtre d'attente annulable pendant un appel à l'IA. Retourne le résultat, ou null en cas d'erreur.
+async function avecProgression(message, travail) {
+  const controle = new AbortController();
+  rechercheEnCours = controle;
+  openModal(`<h2>L'IA travaille…</h2>
+    <div class="ia-progress"><span class="spinner"></span><div>${message}<div class="muted">Généralement moins d'une minute.</div></div></div>
+    <div class="modal-actions"><button type="button" class="btn" data-action="ia-annuler">Annuler</button></div>`);
+  $modal.querySelector('.modal-bg').dataset.action = 'noop';
+  try { return await travail(controle.signal); }
+  catch (e) {
+    openModal(`<h2>Opération interrompue</h2><p>${esc(e.message)}</p><div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Fermer</button></div>`);
+    return null;
+  } finally { rechercheEnCours = null; }
+}
+
+// Tout ce que l'IA doit savoir sur l'entreprise et le plan en cours.
+function contexteIA(p) {
+  const c = clientById(p.clientId) || {};
+  const r = resultats(p);
+  const plan = {
+    titre: p.titre, motif: motifLabel(p), raison: p.motifDetail, periode: `${p.debut} → ${p.fin}`, budgetEnvisage: num(p.budgetPrevu),
+    resume: p.resume, contexte: p.contexte, swot: p.swot, objectifs: p.objectifs.map(o => ({ objectif: o.objectif, cible: o.cible, actuel: o.actuel, progression: o.progression })),
+    cibles: p.cibles, positionnement: p.positionnement, messageCle: p.messageCle, slogan: p.slogan,
+    actions: p.actions.map(a => ({ canal: a.canal, action: a.action, budget: num(a.budget), statut: a.statut, depense: num(a.depense), prospects: num(a.prospects), ventes: num(a.ventes) })),
+  };
+  return [
+    `Entreprise : ${c.nom} — secteur : ${secteurLabel(c.secteur)}${c.adresse ? ` — ${c.adresse}` : ''}`,
+    `Devise : ${data.settings.devise}. Date du jour : ${todayISO()}.`,
+    c.fiche && `Fiche entreprise :\n${texteContexte(c)}`,
+    c.fiche && `Diagnostic :\n${diagnostic(c).map(d => `- [${d.type}] ${d.texte}`).join('\n')}`,
+    `Canaux disponibles : ${CANAUX.join(', ')}.`,
+    r.aDesDonnees && `Résultats réels : dépensé ${r.depense}, prospects ${r.prospects}, ventes ${r.ventes}, ROI ${Math.round(r.roi)} %.`,
+    `Plan en cours (JSON) :\n${JSON.stringify(plan)}`,
+  ].filter(Boolean).join('\n\n');
+}
+
+let proposition = null;
+
+function apercuValeur(v) {
+  if (Array.isArray(v)) {
+    if (!v.length) return '<p class="muted">—</p>';
+    if (typeof v[0] !== 'object') return `<ul>${v.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    const cols = Object.keys(v[0]);
+    return `<div class="table-wrap flat"><table><thead><tr>${cols.map(k => `<th>${esc(LIBELLES_IA[k] || k)}</th>`).join('')}</tr></thead><tbody>${v.map(o => `<tr>${cols.map(k => `<td>${esc(typeof o[k] === 'number' ? fmt(o[k]).replace(/,00$/, '') : o[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+  return `<p>${nl2br(v)}</p>`;
+}
+
+const LIBELLES_IA = { resume: 'Résumé', contexte: 'Situation actuelle', concurrents: 'Marché et concurrence', forces: 'Forces', faiblesses: 'Faiblesses', opportunites: 'Opportunités', menaces: 'Menaces', objectifs: 'Objectifs', cibles: 'Cibles', positionnement: 'Positionnement', messageCle: 'Message clé', slogans: 'Slogans proposés', ton: 'Ton', produit: 'Produit', prix: 'Prix', distribution: 'Distribution', promotion: 'Communication', actions: 'Actions', kpis: 'Indicateurs', suivi: 'Suivi', risques: 'Risques', bilan: 'Bilan', objectif: 'Objectif', indicateur: 'Indicateur', cible: 'Cible', echeance: 'Échéance', nom: 'Nom', description: 'Description', besoins: 'Besoins', canaux: 'Canaux', canal: 'Canal', action: 'Action', budget: 'Budget', debut: 'Début', fin: 'Fin' };
+
+async function proposerSection(p, section) {
+  if (!demanderCle()) return;
+  const res = await avecProgression(section === 'tout' ? 'Rédaction du brouillon complet du plan…' : 'Rédaction de propositions pour cette étape…',
+    signal => genererSection(data.settings.cleApi, section, contexteIA(p), signal));
+  if (!res) return;
+  proposition = { section, donnees: res.donnees, planId: p.id };
+  const d = res.donnees;
+  openModal(`<h2>Proposition de l'IA</h2>
+    <div class="ia-apercu">${Object.entries(d).map(([k, v]) => `<h4>${esc(LIBELLES_IA[k] || k)}</h4>${k === 'slogans'
+      ? v.map((x, i) => `<label class="check"><input type="radio" name="slogan" value="${i}" ${i === 0 ? 'checked' : ''}> ${esc(x)}</label>`).join('')
+      : apercuValeur(v)}`).join('')}</div>
+    <p class="muted">Coût estimé : ${usd(res.cout)}. « Compléter » remplit les champs vides et ajoute les éléments des listes ; « Remplacer » écrase le contenu des parties concernées.</p>
+    <div class="modal-actions wrap"><button type="button" class="btn" data-action="close-modal">Ignorer</button>
+      <button type="button" class="btn" data-action="ia-appliquer" data-mode="remplacer">Remplacer</button>
+      <button type="button" class="btn btn-primary" data-action="ia-appliquer" data-mode="completer">Compléter le plan</button></div>`, true);
+}
+
+function appliquerProposition(p, mode) {
+  if (!proposition || proposition.planId !== p.id) return;
+  const d = proposition.donnees;
+  const rempl = mode === 'remplacer';
+  const txt = (cle, val) => { if (val === undefined) return; if (rempl || !String(p[cle] || '').trim()) p[cle] = val; };
+  const lignes = (obj, cle, arr) => { if (!arr) return; const t = arr.join('\n'); obj[cle] = rempl || !obj[cle].trim() ? t : `${obj[cle]}\n${t}`; };
+  const borne = iso => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? (iso < p.debut ? p.debut : iso > p.fin ? p.fin : iso) : '');
+  txt('resume', d.resume); txt('contexte', d.contexte); txt('concurrents', d.concurrents);
+  ['forces', 'faiblesses', 'opportunites', 'menaces'].forEach(k => lignes(p.swot, k, d[k]));
+  if (d.objectifs) p.objectifs = [...(rempl ? [] : p.objectifs), ...d.objectifs.map(o => ({ ...o, actuel: '', progression: 0 }))];
+  if (d.cibles) p.cibles = [...(rempl ? [] : p.cibles), ...d.cibles];
+  txt('positionnement', d.positionnement); txt('messageCle', d.messageCle); txt('ton', d.ton);
+  if (d.slogans?.length) txt('slogan', d.slogans[+($modal.querySelector('input[name=slogan]:checked')?.value || 0)]);
+  ['produit', 'prix', 'distribution', 'promotion'].forEach(k => { if (d[k] !== undefined && (rempl || !p.mix[k].trim())) p.mix[k] = d[k]; });
+  if (d.actions) p.actions = [...(rempl ? [] : p.actions), ...d.actions.map(a => normaliserPlan({ actions: [{ ...a, budget: num(a.budget), debut: borne(a.debut) || p.debut, fin: borne(a.fin) || p.fin, responsable: '' }] }).actions[0])];
+  if (d.kpis) p.kpis = rempl || !p.kpis.trim() ? d.kpis.join('\n') : `${p.kpis}\n${d.kpis.join('\n')}`;
+  txt('suivi', d.suivi); txt('risques', d.risques); txt('bilan', d.bilan);
+  proposition = null;
+  persist(true); closeModal(); rerenderKeepScroll(); toast('Proposition appliquée au plan. Relisez et ajustez.');
+}
 
 function modalRechercheIA(c) {
   if (!data.settings.cleApi) {
@@ -698,7 +797,8 @@ function viewPlanEditor(p, step) {
         <div class="panel score-panel" data-live="score">${scorePanel(p)}</div>
       </div>
       <div class="panel step-body">
-        <h3>${idx + 1}. ${curLabel}</h3>
+        <div class="step-title"><h3>${idx + 1}. ${curLabel}</h3>${IA_ETAPE[cur] ? `<button class="btn btn-sm btn-ia" data-action="ia-section" data-section="${IA_ETAPE[cur]}">✨ Proposer avec l'IA</button>` : ''}</div>
+        ${cur === 'infos' ? `<div class="ia-box"><div><b>Brouillon complet par l'IA</b><div class="muted">À partir de la fiche entreprise, du motif et du budget, l'IA propose toutes les parties du plan. Vous relisez et ajustez ensuite.</div></div><button class="btn btn-primary" data-action="ia-section" data-section="tout">✨ Rédiger tout le plan</button></div>` : ''}
         ${stepContent(p, cur)}
         <div class="step-nav">
           ${prev ? `<a class="btn" href="#/plan/${p.id}/${prev[0]}">← ${prev[1]}</a>` : '<span></span>'}
@@ -1219,6 +1319,8 @@ document.addEventListener('click', e => {
     case 'ia-recherche': modalRechercheIA(clientById(id)); break;
     case 'ia-lancer': lancerRechercheIA(clientById(id), $modal.querySelector('[name=remplacer]')?.checked); break;
     case 'ia-annuler': rechercheEnCours?.abort(); break;
+    case 'ia-section': proposerSection(p, el.dataset.section); break;
+    case 'ia-appliquer': appliquerProposition(p, el.dataset.mode); break;
     case 'importer-fiche': {
       const c = clientById(p.clientId);
       if (!completude(c)) { toast('La fiche de cette entreprise est vide : remplissez-la d\'abord.', 'err'); break; }

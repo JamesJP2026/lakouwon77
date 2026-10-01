@@ -238,6 +238,15 @@ input[data-cbind$=".url"]{min-width:190px;}
 .sources{padding-left:18px; font-size:13px;} .sources li{margin-bottom:3px; word-break:break-word;}
 .steps-list{padding-left:18px; line-height:1.7;}
 
+/* Rédaction par IA */
+.step-title{display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;}
+.step-title h3{margin:0;}
+.btn-ia{background:linear-gradient(90deg,#fff7e6,#f3ecff); border-color:#e2d3f5; color:#5b3a8c;}
+.ia-apercu{max-height:55vh; overflow-y:auto; padding-right:6px;}
+.ia-apercu h4{margin:14px 0 6px;}
+.ia-apercu ul{margin:0; padding-left:18px;}
+.ia-apercu table td{padding:6px 8px;}
+
 /* Filtres */
 .filters{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
 .filters input{flex:1; min-width:200px;}

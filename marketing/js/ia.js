@@ -168,3 +168,86 @@ export function fusionnerResultat(c, d, remplacer = false) {
   f.recherche = [f.recherche, bloc].filter(s => s && s.trim()).join('\n\n');
   return modifs;
 }
+
+// ---------------------------------------------------------------------------
+// Rédaction assistée : propositions pour une étape du plan (ou tout le plan),
+// renvoyées en JSON garanti par les sorties structurées.
+
+const liste = (description, items) => ({ type: 'array', description, items });
+const OBJ_OBJECTIF = objet({ objectif: texte('Objectif.'), indicateur: texte('Indicateur mesurable.'), cible: texte('Valeur cible chiffrée.'), echeance: texte('Échéance, ex. « 6 mois ».') });
+const OBJ_CIBLE = objet({ nom: texte('Nom court du groupe.'), description: texte('Profil : âge, lieu, revenus, profession…'), besoins: texte('Besoins et motivations.'), canaux: texte('Où et comment les toucher.') });
+const OBJ_ACTION = objet({
+  canal: texte('Canal, de préférence dans la liste fournie.'), action: texte('Action concrète.'), description: texte('Détails : fréquence, format, zone.'),
+  budget: { type: 'number', description: 'Budget en devise du plan.' },
+  debut: texte('Date de début AAAA-MM-JJ, dans la période du plan.'), fin: texte('Date de fin AAAA-MM-JJ, dans la période du plan.'),
+});
+const PARTIES = {
+  resume: { resume: texte('Résumé du plan pour le client, 4 à 6 phrases : situation, ambition, stratégie, résultats attendus.') },
+  analyse: {
+    contexte: texte('Situation actuelle de l\'entreprise, quelques lignes.'), concurrents: texte('Marché et concurrence.'),
+    forces: liste('Forces.', texte('Une force.')), faiblesses: liste('Faiblesses.', texte('Une faiblesse.')),
+    opportunites: liste('Opportunités.', texte('Une opportunité.')), menaces: liste('Menaces.', texte('Une menace.')),
+  },
+  objectifs: { objectifs: liste('3 à 5 objectifs SMART.', OBJ_OBJECTIF) },
+  cibles: { cibles: liste('2 ou 3 cibles.', OBJ_CIBLE) },
+  strategie: {
+    positionnement: texte('Positionnement.'), messageCle: texte('Message clé / promesse.'), slogans: liste('3 propositions de slogan courtes.', texte('Un slogan.')),
+    ton: texte('Ton de communication.'), produit: texte('Mix : produit / service.'), prix: texte('Mix : prix.'), distribution: texte('Mix : distribution.'), promotion: texte('Mix : communication.'),
+  },
+  actions: { actions: liste('5 à 8 actions dont la somme des budgets ne dépasse pas le budget envisagé.', OBJ_ACTION) },
+  suivi: { kpis: liste('Indicateurs clés.', texte('Un indicateur.')), suivi: texte('Méthode de suivi et de reporting.'), risques: texte('Risques et plan B.') },
+  bilan: { bilan: texte('Bilan pour le client : ce qui a fonctionné, ce qui sera ajusté, prochaines étapes. 5 à 8 phrases.') },
+};
+const CONSIGNES = {
+  resume: 'Rédige le résumé du plan.',
+  analyse: 'Rédige l\'analyse de la situation et le SWOT (3 à 5 éléments par case), en t\'appuyant sur la fiche et le diagnostic.',
+  objectifs: 'Propose des objectifs SMART cohérents avec le motif du plan et les chiffres actuels de l\'entreprise.',
+  cibles: 'Décris les cibles prioritaires.',
+  strategie: 'Propose la stratégie : positionnement, message clé, 3 slogans, ton et marketing mix.',
+  actions: 'Propose le plan d\'action avec budgets et dates, adapté aux moyens de l\'entreprise et à son marché.',
+  suivi: 'Propose les indicateurs de suivi, la méthode de reporting et les risques.',
+  bilan: 'Rédige le bilan à partir des résultats réels saisis.',
+  tout: 'Rédige un brouillon complet du plan marketing (toutes les parties).',
+};
+
+export const SECTIONS_IA = Object.keys(CONSIGNES);
+
+const SYSTEME_REDACTION = `Tu es consultant senior dans une agence marketing et publicitaire. Tu rédiges, en français clair et concret, des parties de plans marketing pour des entreprises de tout secteur, notamment en Haïti et dans la diaspora. Appuie-toi uniquement sur les informations fournies (entreprise, fiche, diagnostic, plan en cours) ; quand une information manque, fais des propositions réalistes et prudentes plutôt que d'inventer des faits ou des chiffres présentés comme réels. Les montants sont dans la devise indiquée.`;
+
+async function appelStructure(cleApi, systeme, contenu, schema, signal, effort = 'medium') {
+  const Anthropic = await chargerSDK();
+  const api = new Anthropic({ apiKey: cleApi, dangerouslyAllowBrowser: true });
+  try {
+    const r = await api.beta.messages.create({
+      model: MODELE, max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort, format: { type: 'json_schema', schema } },
+      system: systeme,
+      messages: [{ role: 'user', content: contenu }],
+    }, { signal });
+    if (r.stop_reason === 'refusal') throw new Error('La demande a été refusée par le service.');
+    if (r.stop_reason === 'max_tokens') throw new Error('La réponse a été coupée (trop longue). Réessayez sur une seule étape.');
+    const bloc = r.content.find(b => b.type === 'text');
+    if (!bloc) throw new Error('Réponse vide. Réessayez.');
+    const usage = { entree: 0, cacheLecture: 0, sortie: 0, recherches: 0 };
+    cumulerUsage(usage, r.usage);
+    return { donnees: JSON.parse(bloc.text), cout: coutEstime(usage) };
+  } catch (e) {
+    if (e instanceof Anthropic.APIError || e instanceof Anthropic.AnthropicError) throw new Error(messageErreur(Anthropic, e));
+    throw e;
+  }
+}
+
+// section : une clé de CONSIGNES ; contexte : texte décrivant l'entreprise et le plan.
+export async function genererSection(cleApi, section, contexte, signal) {
+  const props = section === 'tout'
+    ? Object.assign({}, ...['resume', 'analyse', 'objectifs', 'cibles', 'strategie', 'actions', 'suivi'].map(k => PARTIES[k]))
+    : PARTIES[section];
+  return appelStructure(cleApi, SYSTEME_REDACTION, `${contexte}\n\nTâche : ${CONSIGNES[section]}`, objet(props), signal);
+}
+
+// Usage générique (calendrier, rapports…) : consigne libre + schéma de propriétés.
+export async function genererLibre(cleApi, consigne, contexte, proprietes, signal, effort) {
+  return appelStructure(cleApi, SYSTEME_REDACTION, `${contexte}\n\nTâche : ${consigne}`, objet(proprietes), signal, effort);
+}
+export const schema = { texte, nombre, objet, liste };
