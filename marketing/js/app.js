@@ -4,6 +4,7 @@ import {
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
+import { FREQUENCES, dateSuivante, genererRecurrentes, relancesAFaire } from './facturation.js';
 import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema as S } from './ia.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
 
@@ -152,6 +153,8 @@ function viewDashboard() {
     .sort((a, b) => (a.echeance || '').localeCompare(b.echeance || ''));
   const recents = [...data.plans].sort((a, b) => (b.creeLe || '').localeCompare(a.creeLe || '')).slice(0, 6);
   const semaine = addDays(todayISO(), 7);
+  const relances = relancesAFaire(data.factures);
+  const aValider = data.factures.filter(f => f.recurrenteDe && f.statut === 'brouillon');
   const aSuivre = toutesActions().filter(({ a, p }) => a.statut !== 'termine' &&
     (actionEnRetard(a, p) || (a.statut === 'a_faire' && (a.debut || p.debut) <= semaine)));
 
@@ -170,6 +173,15 @@ function viewDashboard() {
       <div class="kpi pos"><div class="lbl">Encaissé</div><div class="val num">${money(encaisse)}</div></div>
       <div class="kpi ${aEncaisser > 0 ? 'neg' : ''}"><div class="lbl">Reste à encaisser</div><div class="val num">${money(aEncaisser)}</div><div class="sub">${impayees.length} facture(s) ouverte(s)</div></div>
     </div>
+    ${relances.length || aValider.length ? `<div class="grid-2">
+      ${relances.length ? `<div class="panel"><h3>Relances à faire <span class="n">rappels de paiement du jour</span></h3><table><tbody>${relances.map(({ f, etape, jours }) => `<tr>
+        <td><b>${esc(f.numero)}</b><div class="muted">${esc(clientById(f.clientId)?.nom || '')}</div></td>
+        <td class="${etape === 'retard' ? 'txt-red' : 'muted'}">${etape === 'avant' ? `Échéance dans ${jours} j` : etape === 'jour' ? 'Échéance aujourd\'hui' : `En retard de ${-jours} j`}</td>
+        <td class="r num">${money(totauxFacture(f).reste)}</td>
+        <td class="r"><button class="btn btn-sm btn-gold" data-action="relance-dash" data-id="${f.id}">Relancer</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${aValider.length ? `<div class="panel"><h3>Factures récurrentes à valider</h3><table><tbody>${aValider.map(f => `<tr class="rowlink" data-href="#/facture/${f.id}">
+        <td><b>${esc(f.numero)}</b> ↻<div class="muted">${esc(f.objet)}</div></td><td>${esc(clientById(f.clientId)?.nom || '')}</td><td class="r num">${money(totauxFacture(f).total)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    </div>` : ''}
     ${aSuivre.length ? `<div class="panel"><h3>Actions à suivre <span class="n">en retard ou à lancer cette semaine</span></h3>
       <table><tbody>${aSuivre.slice(0, 8).map(({ a, p }) => `<tr class="rowlink" data-href="#/actions">
         <td><b>${esc(a.canal)}</b> — ${esc(a.action)}<div class="muted">${esc(p.titre)} · ${esc(clientById(p.clientId)?.nom || '')}</div></td>
@@ -1032,15 +1044,58 @@ function nouveauNumero(date) {
   return `${s.prefixeFacture || 'FAC'}-${date.slice(0, 4)}-${String(n).padStart(4, '0')}`;
 }
 
+// Coordonnées de paiement (paramètres) en texte, pour la facture, les relances et le QR code.
+function textePaiement(f) {
+  const pm = data.settings.paiement || {};
+  return [pm.lien && `Payer en ligne : ${pm.lien}`, pm.moncash && `MonCash : ${pm.moncash}`, pm.natcash && `NatCash : ${pm.natcash}`, pm.banque && `Virement : ${pm.banque}`]
+    .filter(Boolean).join('\n');
+}
+
+function blocPaiement(f) {
+  const txt = textePaiement(f);
+  if (!txt || ['annulee', 'payee'].includes(f.statut)) return '';
+  const pm = data.settings.paiement;
+  const t = totauxFacture(f);
+  const contenuQR = pm.lien || `${data.settings.nom}\nFacture ${f.numero}\nMontant : ${fmt(t.reste || t.total)} ${data.settings.devise}\n${txt}`;
+  return `<div class="inv-pay-how">
+    <div><h4>Comment payer</h4><p>${nl2br(txt)}</p><p class="muted">Indiquez la référence <b>${esc(f.numero)}</b> avec votre paiement.</p></div>
+    <figure><div class="qr" data-qr="${esc(contenuQR)}"></div><figcaption>${pm.lien ? 'Scannez pour payer en ligne' : 'Scannez pour enregistrer les coordonnées de paiement'}</figcaption></figure>
+  </div>`;
+}
+
+async function initQR() {
+  const zones = document.querySelectorAll('[data-qr]');
+  if (!zones.length) return;
+  try {
+    const qrcode = (await import('./vendor/qrcode.esm.js')).default;
+    zones.forEach(z => { const q = qrcode(0, 'M'); q.addData(z.dataset.qr, 'Byte'); q.make(); z.innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); });
+  } catch { zones.forEach(z => { z.textContent = ''; }); }
+}
+
+let relanceCourante = null;
+const marquerRelance = canal => {
+  if (!relanceCourante) return;
+  relanceCourante.relances = [...(relanceCourante.relances || []), { date: todayISO(), canal }];
+  persist(true);
+};
+
 function modalRelance(f) {
+  relanceCourante = f;
   const c = clientById(f.clientId) || {};
   const t = totauxFacture(f);
   const s = data.settings;
-  const msg = `Bonjour${c.contact ? ' ' + c.contact : ''},\n\nSauf erreur de notre part, la facture ${f.numero} du ${dateCourte(f.date)} (${f.objet}) reste à régler : ${fmt(t.reste)} ${s.devise}, échéance le ${dateCourte(f.echeance)}.\n${s.mentions ? '\nModalités de paiement :\n' + s.mentions + '\n' : ''}\nMerci d'avance et belle journée,\n${s.nom}${s.telephone ? '\n' + s.telephone : ''}`;
+  const j = Math.round((new Date(f.echeance) - new Date(todayISO())) / 86400000);
+  const intro = j > 0 ? `Petit rappel amical : la facture ${f.numero} du ${dateCourte(f.date)} (${f.objet}) arrive à échéance le ${dateCourte(f.echeance)}. Montant : ${fmt(t.reste)} ${s.devise}.`
+    : j === 0 ? `La facture ${f.numero} du ${dateCourte(f.date)} (${f.objet}) arrive à échéance aujourd'hui. Montant : ${fmt(t.reste)} ${s.devise}.`
+    : `Sauf erreur de notre part, la facture ${f.numero} du ${dateCourte(f.date)} (${f.objet}) reste à régler : ${fmt(t.reste)} ${s.devise}, échue depuis ${-j} jour(s) (le ${dateCourte(f.echeance)}).`;
+  const modalites = textePaiement(f) || s.mentions;
+  const msg = `Bonjour${c.contact ? ' ' + c.contact : ''},\n\n${intro}\n${modalites ? '\nModalités de paiement :\n' + modalites + '\n' : ''}\nMerci d'avance et belle journée,\n${s.nom}${s.telephone ? '\n' + s.telephone : ''}`;
+  const historique = (f.relances || []).map(r => `${dateCourte(r.date)} (${r.canal})`).join(', ');
   const tel = String(c.telephone || '').replace(/\D/g, '');
   openModal(`<h2>Relancer — ${esc(f.numero)}</h2>
     <p class="muted">Message prêt à envoyer (modifiable) :</p>
     <textarea id="relance-msg" rows="10">${esc(msg)}</textarea>
+    ${historique ? `<p class="muted">Déjà relancé : ${historique}</p>` : ''}
     <div class="modal-actions wrap">
       <button type="button" class="btn" data-action="copier-relance">Copier</button>
       ${c.email ? `<a class="btn" data-relance="mail" data-sujet="Facture ${esc(f.numero)}" href="mailto:${esc(c.email)}" target="_blank" rel="noopener">Email</a>` : ''}
@@ -1081,6 +1136,28 @@ function creerFacture(p, opts) {
 // ---------- Factures ----------
 const factureEnRetard = f => ['envoyee', 'partielle'].includes(f.statut) && f.echeance < todayISO();
 
+function modalRecurrence(f) {
+  const r = f.recurrence || { actif: true, frequence: 'mensuelle', prochaine: dateSuivante(f.date, 'mensuelle'), fin: '', objet: f.objet };
+  openModal(`<h2>Facturation récurrente — ${esc(f.numero)}</h2>
+    <form data-form="recurrence" data-id="${f.id}">
+      <p class="muted">Pour les prestations facturées régulièrement (gestion des réseaux sociaux, abonnement…). À chaque échéance, l'application prépare automatiquement une nouvelle facture en brouillon, identique à celle-ci, à valider puis envoyer.</p>
+      <label class="check"><input type="checkbox" name="actif" ${r.actif ? 'checked' : ''}> Facturation récurrente active</label>
+      <div class="form-grid mt">
+        <label>Fréquence<select name="frequence">${Object.entries(FREQUENCES).map(([k, l]) => `<option value="${k}" ${r.frequence === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label>Prochaine facture le<input type="date" name="prochaine" value="${esc(r.prochaine)}" required></label>
+        <label>Jusqu'au (facultatif)<input type="date" name="fin" value="${esc(r.fin)}"></label>
+        <label>Objet des factures<input name="objet" value="${esc(r.objet || f.objet)}"></label>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Enregistrer</button></div>
+    </form>`, true);
+}
+
+function verifierRecurrentes() {
+  const crees = genererRecurrentes(data.factures, nouveauNumero);
+  if (crees.length) { persist(true); toast(`${crees.length} facture(s) récurrente(s) préparée(s) en brouillon : à valider dans Factures.`); }
+  return crees;
+}
+
 function viewFactures() {
   const fl = filtres.factures;
   const list = [...data.factures].sort((a, b) => (b.date + b.numero).localeCompare(a.date + a.numero))
@@ -1096,7 +1173,7 @@ function viewFactures() {
         const t = totauxFacture(f);
         const late = !['payee', 'annulee', 'brouillon'].includes(f.statut) && f.echeance < todayISO();
         return `<tr class="rowlink" data-href="#/facture/${f.id}">
-          <td><b>${esc(f.numero)}</b><div class="muted">${esc(f.objet || '')}</div></td>
+          <td><b>${esc(f.numero)}</b>${f.recurrence?.actif ? ' <span title="Facturation récurrente">↻</span>' : ''}<div class="muted">${esc(f.objet || '')}</div></td>
           <td>${esc(clientById(f.clientId)?.nom || '—')}</td><td>${dateCourte(f.date)}</td>
           <td class="${late ? 'txt-red' : ''}">${dateCourte(f.echeance)}</td>
           <td class="r num">${money(t.total)}</td><td class="r num">${f.statut === 'annulee' ? '—' : money(t.reste)}</td>
@@ -1121,6 +1198,7 @@ function viewFacture(f) {
       <button class="btn btn-primary" data-action="emettre-facture" data-id="${f.id}">Valider et émettre</button>` : ''}
     ${['envoyee', 'partielle'].includes(f.statut) ? `<button class="btn" data-action="relance" data-id="${f.id}">✉ Relancer</button>` : ''}
     <button class="btn" data-action="dup-facture" data-id="${f.id}" title="Pour facturer à nouveau (ex. mois suivant)">⧉ Dupliquer</button>
+    ${f.statut !== 'annulee' && !f.recurrenteDe ? `<button class="btn ${f.recurrence?.actif ? 'btn-gold' : ''}" data-action="recurrence" data-id="${f.id}">↻ ${f.recurrence?.actif ? 'Récurrente' : 'Rendre récurrente'}</button>` : ''}
     ${['envoyee', 'partielle'].includes(f.statut) ? `<button class="btn btn-gold" data-action="paiement" data-id="${f.id}">Enregistrer un paiement</button>
       <button class="btn btn-danger" data-action="annuler-facture" data-id="${f.id}">Annuler</button>` : ''}`;
 
@@ -1157,6 +1235,7 @@ function viewFacture(f) {
       ${t.paye ? `<tr><td>Déjà payé</td><td class="r num">− ${money(t.paye)}</td></tr><tr class="grand"><td>Reste à payer</td><td class="r num">${money(t.reste)}</td></tr>` : ''}
     </table></div>
     ${(f.paiements || []).length ? `<div class="inv-pay"><h4>Paiements reçus</h4>${f.paiements.map(pm => `<div>${dateCourte(pm.date)} — ${money(pm.montant)} (${esc(pm.mode)})${pm.ref ? ` · réf. ${esc(pm.ref)}` : ''}</div>`).join('')}</div>` : ''}
+    ${blocPaiement(f)}
     <div class="inv-notes">${edit ? `<label>Conditions / notes<textarea data-fbind="notes" rows="3">${esc(f.notes)}</textarea></label>` : f.notes ? `<p>${nl2br(f.notes)}</p>` : ''}</div>
     ${s.mentions ? `<footer class="doc-foot">${nl2br(s.mentions)}</footer>` : ''}
   </article>`;
@@ -1215,6 +1294,11 @@ function viewParametres() {
         ${sb('prochainNumero', 'Prochain numéro', 'type="number" min="1" data-type="num"')}
         ${sb('delaiPaiement', 'Délai de paiement (jours)', 'type="number" min="0" data-type="num"')}
         <label class="full">Conditions de paiement par défaut<textarea data-sbind="conditions" rows="2">${esc(s.conditions)}</textarea></label>
+        <label>MonCash (numéro)<input data-sbind="paiement.moncash" value="${esc(s.paiement?.moncash)}" placeholder="+509 …"></label>
+        <label>NatCash (numéro)<input data-sbind="paiement.natcash" value="${esc(s.paiement?.natcash)}" placeholder="+509 …"></label>
+        <label class="full">Virement bancaire (banque, nom du compte, numéro)<input data-sbind="paiement.banque" value="${esc(s.paiement?.banque)}"></label>
+        <label class="full">Lien de paiement en ligne (facultatif : PayPal, Stripe, lien de votre banque…)<input data-sbind="paiement.lien" value="${esc(s.paiement?.lien)}" placeholder="https://…"></label>
+        <p class="full muted">Ces coordonnées apparaissent sur chaque facture avec un QR code, et dans les messages de relance.</p>
         <label class="full">Mentions en bas de facture (coordonnées bancaires, MonCash…)<textarea data-sbind="mentions" rows="2">${esc(s.mentions)}</textarea></label>
       </div></div>
     <div class="panel"><h3>Recherche par IA</h3>
@@ -1271,6 +1355,7 @@ function render() {
   renderShell(nav);
   $view.innerHTML = html;
   initSignature();
+  initQR();
   document.body.classList.toggle('menu-open', false);
 }
 
@@ -1285,6 +1370,7 @@ document.addEventListener('click', e => {
     const txt = encodeURIComponent(document.getElementById('relance-msg')?.value || '');
     const base = lien.href.split('?')[0];
     lien.href = lien.dataset.relance === 'wa' ? `${base}?text=${txt}` : `${base}?subject=${encodeURIComponent(lien.dataset.sujet)}&body=${txt}`;
+    marquerRelance(lien.dataset.relance === 'wa' ? 'WhatsApp' : 'email');
     return;
   }
   const el = e.target.closest('[data-action]');
@@ -1344,10 +1430,13 @@ document.addEventListener('click', e => {
     case 'copier-relance': {
       const ta = document.getElementById('relance-msg');
       ta.select();
+      marquerRelance('copié');
       (navigator.clipboard?.writeText(ta.value) || Promise.reject()).then(() => toast('Message copié.'))
         .catch(() => toast('Texte sélectionné : faites Ctrl+C pour le copier.'));
       break;
     }
+    case 'recurrence': modalRecurrence(f); break;
+    case 'relance-dash': modalRelance(factureById(id)); break;
     case 'dup-facture': {
       const date = todayISO();
       const copy = { ...structuredClone(f), id: uid(), numero: nouveauNumero(date), date, echeance: addDays(date, num(data.settings.delaiPaiement)), statut: 'brouillon', montantPaye: 0, paiements: [] };
@@ -1479,6 +1568,11 @@ function handleForm(form) {
     if (!fd.honoraires && !fd.media) { toast('Cochez au moins un élément à facturer.', 'err'); return; }
     const f = creerFacture(planById(form.dataset.id), { honoraires: !!fd.honoraires, media: !!fd.media, mediaDetail: !!fd.mediaDetail, type: fd.type, acomptePct: fd.acomptePct, date: fd.date, delai: fd.delai });
     closeModal(); go(`#/facture/${f.id}`); toast(`Facture ${f.numero} créée (brouillon).`);
+  } else if (kind === 'recurrence') {
+    const f = factureById(form.dataset.id);
+    f.recurrence = { actif: !!fd.actif, frequence: fd.frequence, prochaine: fd.prochaine, fin: fd.fin, objet: fd.objet.trim() || f.objet };
+    persist(true); closeModal(); verifierRecurrentes(); render();
+    if (!data.factures.some(x => x.recurrenteDe === f.id && x.statut === 'brouillon')) toast(f.recurrence.actif ? `Prochaine facture le ${dateCourte(f.recurrence.prochaine)}.` : 'Facturation récurrente désactivée.');
   } else if (kind === 'paiement') {
     const f = factureById(form.dataset.id);
     const montant = num(fd.montant);
@@ -1621,4 +1715,5 @@ function chargerDemo() {
   toast('Exemple chargé : un client et un plan complet.');
 }
 
+verifierRecurrentes();
 render();

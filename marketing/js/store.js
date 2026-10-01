@@ -10,6 +10,8 @@ export const defaultData = () => ({
     mentions: '',
     // Clé API Anthropic pour la recherche par IA (reste dans ce navigateur, jamais exportée).
     cleApi: '',
+    // Moyens de paiement affichés sur les factures (et dans le QR code).
+    paiement: { moncash: '', natcash: '', banque: '', lien: '' },
     // Prestations courantes, ajoutées en un clic dans les honoraires d'un plan.
     catalogue: [
       { description: 'Élaboration de la stratégie et du plan marketing', pu: 0 },
