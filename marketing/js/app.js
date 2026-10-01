@@ -7,7 +7,7 @@ import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, comp
 import { histogramme } from './graphiques.js';
 import { sync } from './sync.js';
 import { MODELES, appliquerModele } from './modeles.js';
-import { STATUTS_PUB, nouvellePublication, grilleMois, moisDecale, libelleMois, abregeCanal } from './calendrier.js';
+import { STATUTS_PUB, nouvellePublication, grilleMois, moisDecale, libelleMois, abregeCanal, FORMATS, heureConseillee, programme, lundi, ajouterJours } from './calendrier.js';
 import { FREQUENCES, dateSuivante, genererRecurrentes, relancesAFaire } from './facturation.js';
 import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema } from './ia.js';
 import { normaliserPlan, scorePlan, resultats, recommandations, actionEnRetard, STATUTS_ACTION } from './analyse.js';
@@ -125,6 +125,7 @@ const NAV = [
   ['dashboard', '◧', 'Tableau de bord'],
   ['clients', '◉', 'Entreprises clientes'],
   ['plans', '✎', 'Plans marketing'],
+  ['execution', '📋', 'À publier'],
   ['actions', '☑', 'Suivi des actions'],
   ['factures', '▤', 'Factures'],
   ['temps', '⏱', 'Temps & rentabilité'],
@@ -897,6 +898,7 @@ function vueCalendrier(p) {
         <button class="btn btn-sm btn-ia" data-action="ia-calendrier">✨ Proposer les publications du mois</button>
         <button class="btn btn-sm" data-action="cal-imprimer">🖨 Calendrier à valider</button>
         <button class="btn btn-sm" data-action="partage-client" data-id="${p.id}">🔗 Faire valider par le client</button>
+        <a class="btn btn-sm btn-gold" href="#/execution/${p.id}">📋 Plan d'exécution interne</a>
       </div>
     </div>
     <div class="cal-grid">
@@ -916,11 +918,18 @@ function modalPublication(p, pub) {
       <datalist id="canaux-pub">${CANAUX.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
       <div class="form-grid">
         <label>Date *<input type="date" name="date" value="${esc(pub.date)}" required></label>
+        <label>Heure de publication<input type="time" name="heure" value="${esc(pub.heure)}"><span class="muted">Vide = heure conseillée selon le réseau (ex. ${heureConseillee(pub.canal || 'TikTok')} pour ${esc(pub.canal || 'TikTok')})</span></label>
         <label>Réseau / canal *<input name="canal" list="canaux-pub" value="${esc(pub.canal)}" required></label>
+        <label>Format<select name="format"><option value="">—</option>${FORMATS.map(x => `<option ${pub.format === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
         <label class="full">Titre (pour le calendrier)<input name="titre" value="${esc(pub.titre)}" placeholder="Ex. : Promo de la semaine"></label>
         <label class="full">Texte de la publication<textarea name="texte" rows="6">${esc(pub.texte)}</textarea></label>
         <label class="full">Visuel à prévoir<input name="visuel" value="${esc(pub.visuel)}" placeholder="Photo, vidéo courte, carrousel… et ce qu'elle montre"></label>
+        <label class="check full"><input type="checkbox" name="visuelPret" ${pub.visuelPret ? 'checked' : ''}> Visuel prêt</label>
         <label>Hashtags<input name="hashtags" value="${esc(pub.hashtags)}"></label>
+        <label>Lien à mettre (site, WhatsApp, appli…)<input name="lien" value="${esc(pub.lien)}" placeholder="https://…"></label>
+        <label>Responsable de la publication<input name="responsable" list="responsables" value="${esc(pub.responsable || p.actions.find(a => a.canal === pub.canal)?.responsable || '')}"></label>
+        <datalist id="responsables">${responsablesConnus().map(r => `<option value="${esc(r)}">`).join('')}</datalist>
+        <label class="full">Consignes internes (pour la personne qui publie — jamais montrées au client)<textarea name="consignes" rows="2" placeholder="Ex. : épingler le post, répondre aux commentaires dans l'heure, booster 2 000 HTG sur 3 jours…">${esc(pub.consignes)}</textarea></label>
         <label>Statut<select name="statut">${Object.entries(STATUTS_PUB).map(([k, l]) => `<option value="${k}" ${pub.statut === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="full">Commentaire du client / remarques<input name="commentaire" value="${esc(pub.commentaire)}"></label>
       </div>
@@ -956,7 +965,7 @@ async function proposerCalendrier(p) {
   const debut = `${mois}-01`, fin = moisDecale(mois, 1) + '-01';
   const res = await avecProgression(`Préparation des publications de ${libelleMois(mois)}…`, signal => genererLibre(data.settings.cleApi,
     `Propose le calendrier de publication du mois de ${libelleMois(mois)} (dates de ${debut} inclus à ${fin} exclu, dans la période du plan), en déclinant les actions du plan sur les réseaux concernés : 8 à 16 publications réparties dans le mois, variées (promotion, conseil, témoignage, coulisses…), avec le texte prêt à publier.`,
-    contexteIA(p), { publications: S.liste('Publications du mois.', S.objet({ date: S.texte('Date AAAA-MM-JJ.'), canal: S.texte('Réseau ou canal.'), titre: S.texte('Titre court.'), texte: S.texte('Texte complet.'), visuel: S.texte('Visuel à prévoir.'), hashtags: S.texte('Hashtags.') })) }, signal));
+    contexteIA(p), { publications: S.liste('Publications du mois.', S.objet({ date: S.texte('Date AAAA-MM-JJ.'), heure: S.texte('Heure de publication HH:MM, la plus adaptée au réseau et à la cible.'), canal: S.texte('Réseau ou canal.'), format: S.texte(`Format, parmi : ${FORMATS.join(', ')}.`), titre: S.texte('Titre court.'), texte: S.texte('Texte complet.'), visuel: S.texte('Visuel à prévoir.'), hashtags: S.texte('Hashtags.'), consignes: S.texte('Consignes pratiques pour la personne qui publie (interaction, boost, épinglage…).') })) }, signal));
   if (!res) return;
   const pubs = res.donnees.publications.filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.date));
   propositionCal = { planId: p.id, pubs };
@@ -980,6 +989,105 @@ function imprimerCalendrier(p) {
   document.body.classList.add('print-zone-on');
   window.print();
   setTimeout(() => { document.body.classList.remove('print-zone-on'); w.innerHTML = ''; }, 500);
+}
+
+// ---------- Plan d'exécution interne (« À publier ») ----------
+const filtreExec = { semaine: '', responsable: '' };
+const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+const jourLong = d => new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+function responsablesConnus() {
+  return [...new Set(data.plans.flatMap(p => [...p.actions.map(a => a.responsable), ...(p.publications || []).map(x => x.responsable)]).map(r => (r || '').trim()).filter(Boolean))].sort();
+}
+const responsableDe = it => (it.pub ? it.pub.responsable || it.plan.actions.find(a => a.canal === it.pub.canal)?.responsable : it.action?.responsable) || '';
+
+function itemsExecution(planId, debut, fin) {
+  const plans = data.plans.filter(p => p.statut !== 'refuse' && (!planId || p.id === planId));
+  return programme(plans, debut, fin, num(data.settings.delaiPreparation))
+    .filter(it => !filtreExec.responsable || responsableDe(it) === filtreExec.responsable);
+}
+
+function carteExec(it, aujourdhui) {
+  const p = it.plan, client = clientById(p.clientId)?.nom || '';
+  const resp = responsableDe(it);
+  const tete = (icone, titre) => `<div class="exec-tete"><span class="exec-heure">${esc(it.heure)}</span><b>${icone} ${titre}</b><span class="muted">${esc(client)} · ${esc(p.titre)}${resp ? ` · 👤 ${esc(resp)}` : ''}</span></div>`;
+  if (it.type === 'publication') {
+    const x = it.pub;
+    const fait = x.statut === 'publie';
+    const retard = !fait && x.date < aujourdhui;
+    return `<div class="exec-carte ${fait ? 'fait' : ''} ${retard ? 'retard' : ''}">
+      ${tete('📣', `${esc(x.canal)}${x.format ? ` — ${esc(x.format)}` : ''}`)}
+      ${x.titre ? `<div class="exec-titre">${esc(x.titre)}</div>` : ''}
+      ${!fait && x.statut !== 'valide' ? `<div class="exec-alerte">⚠ Pas encore validé par le client (${esc(STATUTS_PUB[x.statut])})</div>` : ''}
+      ${x.consignes ? `<div class="exec-consignes"><b>Consignes :</b> ${nl2br(x.consignes)}</div>` : ''}
+      <div class="exec-texte">${x.texte ? nl2br(x.texte) : '<span class="muted">Texte à rédiger</span>'}${x.hashtags ? `<div class="muted">${esc(x.hashtags)}</div>` : ''}${x.lien ? `<div>🔗 ${esc(x.lien)}</div>` : ''}</div>
+      ${x.visuel ? `<div class="muted">🖼 Visuel : ${esc(x.visuel)} — ${x.visuelPret ? '<b class="ok-txt">prêt</b>' : '<b class="txt-red">à préparer</b>'}</div>` : ''}
+      <div class="row-btns no-print">
+        <button class="btn btn-sm" data-action="exec-copier" data-plan="${p.id}" data-pid="${x.id}">Copier le texte</button>
+        <button class="btn btn-sm" data-action="exec-modifier" data-plan="${p.id}" data-pid="${x.id}">Modifier</button>
+        ${fait ? `<span class="ok-txt">✓ Publié${x.publieLe ? ' le ' + dateCourte(x.publieLe.slice(0, 10)) : ''}</span>` : `<button class="btn btn-sm btn-primary" data-action="exec-publie" data-plan="${p.id}" data-pid="${x.id}">✓ Marquer publié</button>`}
+      </div>
+      <div class="print-only exec-coche">☐ Publié &nbsp; ☐ Commentaires répondus</div>
+    </div>`;
+  }
+  if (it.type === 'preparation') {
+    const x = it.pub;
+    return `<div class="exec-carte prep">${tete('🎨', `Préparer le visuel — ${esc(x.canal)} du ${dateCourte(x.date)}`)}
+      <div>${esc(x.visuel)}${x.format ? ` <span class="muted">(${esc(x.format)})</span>` : ''}</div>
+      <div class="row-btns no-print"><button class="btn btn-sm" data-action="exec-visuel" data-plan="${p.id}" data-pid="${x.id}">✓ Visuel prêt</button></div></div>`;
+  }
+  const a = it.action;
+  return `<div class="exec-carte action">${tete(it.type === 'action-debut' ? '▶' : '■', `${it.type === 'action-debut' ? 'Démarrer' : 'Terminer'} : ${esc(a.canal)} — ${esc(a.action)}`)}
+    ${a.description ? `<div class="muted">${esc(a.description)}</div>` : ''}${num(a.budget) ? `<div class="muted">Budget : ${money(a.budget)}</div>` : ''}</div>`;
+}
+
+function vueExecution(planId) {
+  const aujourdhui = todayISO();
+  const debut = filtreExec.semaine || lundi(aujourdhui);
+  filtreExec.semaine = debut;
+  const fin = ajouterJours(debut, 6);
+  const plan = planById(planId);
+  const items = itemsExecution(planId, debut, fin);
+  const enRetard = itemsExecution(planId, '2000-01-01', ajouterJours(aujourdhui, -1)).filter(it => it.type === 'publication' && it.pub.statut !== 'publie');
+  const pubs = items.filter(it => it.type === 'publication');
+  const responsables = responsablesConnus();
+  const jours = Array.from({ length: 7 }, (_, i) => ajouterJours(debut, i));
+  return topbar(`Plan d'exécution interne${plan ? ' — ' + esc(plan.titre) : ''}`,
+    `<b class="txt-red">Document interne</b> : quoi publier, où, quand et par qui. À ne pas transmettre au client.`,
+    `${plan ? `<a class="btn" href="#/plan/${plan.id}/calendrier">← Calendrier</a>` : ''}
+     <button class="btn" data-action="exec-programme">✉ Envoyer le programme du jour</button>
+     <button class="btn btn-primary" data-action="print">🖨 Imprimer la semaine</button>`) + `
+  <div class="filters no-print">
+    <div class="row-btns"><button class="btn btn-sm" data-action="exec-semaine" data-delta="-7">◀</button>
+      <button class="btn btn-sm" data-action="exec-semaine" data-delta="0">Cette semaine</button>
+      <button class="btn btn-sm" data-action="exec-semaine" data-delta="7">▶</button></div>
+    <select data-exec-filtre="responsable"><option value="">Tous les responsables</option>${responsables.map(r => `<option ${filtreExec.responsable === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
+    <select data-exec-plan><option value="">Tous les plans</option>${data.plans.filter(p => p.statut !== 'refuse').map(p => `<option value="${p.id}" ${p.id === planId ? 'selected' : ''}>${esc(p.titre)} — ${esc(clientById(p.clientId)?.nom || '')}</option>`).join('')}</select>
+  </div>
+  <h2 class="exec-semaine">Semaine du ${dateFr(debut)} au ${dateFr(fin)}${filtreExec.responsable ? ` · ${esc(filtreExec.responsable)}` : ''}</h2>
+  <div class="kpi-row compact">
+    <div class="kpi"><div class="lbl">Publications de la semaine</div><div class="val">${pubs.length}</div></div>
+    <div class="kpi pos"><div class="lbl">Déjà publiées</div><div class="val">${pubs.filter(it => it.pub.statut === 'publie').length}</div></div>
+    <div class="kpi"><div class="lbl">Visuels à préparer</div><div class="val">${items.filter(it => it.type === 'preparation').length}</div></div>
+    <div class="kpi ${enRetard.length ? 'neg' : ''}"><div class="lbl">En retard</div><div class="val">${enRetard.length}</div></div>
+  </div>
+  ${enRetard.length ? `<div class="panel exec-jour retard-panel"><h3>⚠ En retard (non publiées)</h3>${enRetard.map(it => carteExec(it, aujourdhui)).join('')}</div>` : ''}
+  ${jours.map((d, i) => { const duJour = items.filter(it => it.date === d); return `<div class="panel exec-jour ${d === aujourdhui ? 'auj' : ''}">
+    <h3>${JOURS[i]} ${new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}${d === aujourdhui ? ' <span class="badge st-presente">Aujourd\'hui</span>' : ''}</h3>
+    ${duJour.length ? duJour.map(it => carteExec(it, aujourdhui)).join('') : '<p class="muted">Rien de prévu.</p>'}</div>`; }).join('')}
+  ${!data.plans.some(p => (p.publications || []).length) ? '<p class="hint">Aucune publication planifiée : ajoutez-les dans l\'étape « Calendrier de publication » d\'un plan.</p>' : ''}`;
+}
+
+function texteProgrammeDuJour(planId) {
+  const d = todayISO();
+  const items = itemsExecution(planId, d, d);
+  const lignes = items.map(it => {
+    const client = clientById(it.plan.clientId)?.nom || '';
+    if (it.type === 'publication') return `• ${it.heure} — ${it.pub.canal}${it.pub.format ? ` (${it.pub.format})` : ''} — ${client}\n  ${it.pub.titre || ''}${it.pub.statut !== 'valide' && it.pub.statut !== 'publie' ? ' ⚠ pas encore validé' : ''}${it.pub.consignes ? `\n  Consignes : ${it.pub.consignes}` : ''}`;
+    if (it.type === 'preparation') return `• Préparer le visuel (${it.pub.canal}, publication du ${dateCourte(it.pub.date)}) — ${client} : ${it.pub.visuel}`;
+    return `• ${it.type === 'action-debut' ? 'Démarrer' : 'Terminer'} : ${it.action.canal} — ${it.action.action} (${client})`;
+  });
+  return `Programme du ${jourLong(d)}${filtreExec.responsable ? ` — ${filtreExec.responsable}` : ''} :\n\n${lignes.join('\n\n') || 'Rien de prévu aujourd\'hui.'}\n\nLes textes complets sont dans l'application, page « À publier ».`;
 }
 
 function ecartBudget(p) {
@@ -1844,6 +1952,7 @@ function viewParametres() {
         ${sb('prefixeFacture', 'Préfixe des numéros de facture')}
         ${sb('prochainNumero', 'Prochain numéro', 'type="number" min="1" data-type="num"')}
         ${sb('delaiPaiement', 'Délai de paiement (jours)', 'type="number" min="0" data-type="num"')}
+        ${sb('delaiPreparation', 'Préparer les visuels combien de jours avant publication', 'type="number" min="0" max="14" data-type="num"')}
         ${sb('coutHoraire', `Coût d'une heure de travail (${esc(s.devise)}) — pour la rentabilité`, 'type="number" min="0" step="any" data-type="num"')}
         <label class="full">Conditions de paiement par défaut<textarea data-sbind="conditions" rows="2">${esc(s.conditions)}</textarea></label>
         <label>MonCash (numéro)<input data-sbind="paiement.moncash" value="${esc(s.paiement?.moncash)}" placeholder="+509 …"></label>
@@ -1900,6 +2009,7 @@ function render() {
     html = sub === 'presentation' ? viewPresentation(p) : sub === 'rapport' ? viewRapport(p, parts[3]) : viewPlanEditor(p, sub || 'infos');
   }
   else if (route === 'actions') { data.plans.forEach(normaliserPlan); html = viewActions(); }
+  else if (route === 'execution') { data.plans.forEach(normaliserPlan); html = vueExecution(id || ''); }
   else if (route === 'factures') html = viewFactures();
   else if (route === 'temps') html = viewTemps();
   else if (route === 'facture' && factureById(id)) { nav = 'factures'; current.facture = factureById(id); html = viewFacture(current.facture); }
@@ -2034,6 +2144,24 @@ document.addEventListener('click', e => {
       break;
     }
     case 'cal-imprimer': imprimerCalendrier(p); break;
+    case 'exec-semaine': filtreExec.semaine = +el.dataset.delta ? ajouterJours(filtreExec.semaine || lundi(todayISO()), +el.dataset.delta) : lundi(todayISO()); rerenderKeepScroll(); break;
+    case 'exec-publie': case 'exec-visuel': case 'exec-copier': case 'exec-modifier': {
+      const pl = normaliserPlan(planById(el.dataset.plan)); const x = pl.publications.find(y => y.id === el.dataset.pid);
+      if (!x) break;
+      if (a === 'exec-publie') { x.statut = 'publie'; x.publieLe = new Date().toISOString(); persist(true); rerenderKeepScroll(); toast('Publication marquée comme publiée ✓'); }
+      if (a === 'exec-visuel') { x.visuelPret = true; persist(true); rerenderKeepScroll(); toast('Visuel prêt ✓'); }
+      if (a === 'exec-copier') { const txt = [x.texte, x.hashtags, x.lien].filter(Boolean).join('\n\n'); (navigator.clipboard?.writeText(txt) || Promise.reject()).then(() => toast('Texte copié : collez-le dans le réseau social.')).catch(() => toast('Copie impossible ici : ouvrez « Modifier » et copiez le texte.', 'err')); }
+      if (a === 'exec-modifier') { current.plan = pl; modalPublication(pl, x); }
+      break;
+    }
+    case 'exec-programme': {
+      const txt = texteProgrammeDuJour(location.hash.split('/')[2] || '');
+      openModal(`<h2>Programme du jour</h2><textarea id="relance-msg" rows="14">${esc(txt)}</textarea>
+        <div class="modal-actions wrap"><button type="button" class="btn" data-action="copier-relance">Copier</button>
+        <a class="btn btn-primary" data-relance="wa" href="https://wa.me/" target="_blank" rel="noopener">WhatsApp</a></div>`, true);
+      relanceCourante = null;
+      break;
+    }
     case 'export-fiche': {
       const c = clientById(id);
       const blob = new Blob([JSON.stringify({ type: 'fiche-entreprise', version: 1, client: c }, null, 2)], { type: 'application/json' });
@@ -2270,7 +2398,7 @@ function handleForm(form) {
     persist(true); closeModal(); render(); toast('Temps enregistré.');
   } else if (kind === 'publication') {
     const p = planById(form.dataset.plan);
-    const champs = { date: fd.date, canal: fd.canal.trim(), titre: fd.titre.trim(), texte: fd.texte, visuel: fd.visuel, hashtags: fd.hashtags, statut: fd.statut, commentaire: fd.commentaire };
+    const champs = { date: fd.date, heure: fd.heure, canal: fd.canal.trim(), format: fd.format, titre: fd.titre.trim(), texte: fd.texte, visuel: fd.visuel, visuelPret: !!fd.visuelPret, hashtags: fd.hashtags, lien: fd.lien.trim(), responsable: fd.responsable.trim(), consignes: fd.consignes, statut: fd.statut, commentaire: fd.commentaire };
     const pub = p.publications.find(x => x.id === form.dataset.id);
     if (pub) Object.assign(pub, champs); else p.publications.push(nouvellePublication({ ...champs, id: form.dataset.id }));
     calMois[p.id] = fd.date.slice(0, 7);
@@ -2349,6 +2477,8 @@ document.addEventListener('change', e => {
     if (m) { form.elements.motif.value = m.motif; form.elements.fin.value = addMonths(form.elements.debut.value, m.mois); }
     return;
   }
+  if (el.dataset.execFiltre) { filtreExec[el.dataset.execFiltre] = el.value; render(); return; }
+  if (el.hasAttribute('data-exec-plan')) { go(el.value ? `#/execution/${el.value}` : '#/execution'); return; }
   if (el.dataset.tempsFiltre) { filtreTemps[el.dataset.tempsFiltre] = el.value; render(); return; }
   if (el.dataset.calFiltre) { calFiltre[el.dataset.calFiltre] = el.value; rerenderKeepScroll(); return; }
   const a = el.dataset.actionChange;

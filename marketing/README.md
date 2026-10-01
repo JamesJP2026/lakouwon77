@@ -176,6 +176,22 @@ glisser-déposer, filtres, proposition d'un mois complet par l'IA,
 calendrier à valider imprimable, publications de la semaine sur le tableau
 de bord.
 
+## Plan d'exécution interne (« À publier »)
+
+Document **interne**, séparé de la présentation au client, pour la personne
+qui exécute : semaine par semaine et jour par jour, avec l'heure, quoi
+publier, sur quel réseau et dans quel format, le texte complet prêt à
+copier, les hashtags, le lien, le visuel et les **consignes internes**
+(boost, épinglage, réponses aux commentaires…), le responsable, et une
+alerte si le client n'a pas encore validé. Il comprend aussi les visuels à
+préparer (N jours avant, réglable dans les Paramètres), le début et la fin
+des actions, et les publications en retard. Boutons « Marquer publié »,
+« Visuel prêt », « Copier le texte » ; filtre par responsable et par plan ;
+impression de la semaine avec cases à cocher ; programme du jour à envoyer
+par WhatsApp. Accès : menu « À publier » (tous les plans) ou bouton
+« Plan d'exécution interne » du calendrier d'un plan. Les consignes et le
+responsable ne sont jamais envoyés au portail client.
+
 ## Rapports mensuels
 
 Relevés par mois (dépensé, personnes touchées, prospects, ventes) dans

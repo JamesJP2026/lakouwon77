@@ -236,7 +236,10 @@ begin
       'titre', v_plan ->> 'titre', 'debut', v_plan ->> 'debut', 'fin', v_plan ->> 'fin', 'statut', v_plan ->> 'statut',
       'resume', v_plan ->> 'resume', 'objectifs', v_plan -> 'objectifs', 'actions', v_plan -> 'actions',
       'messageCle', v_plan ->> 'messageCle', 'slogan', v_plan ->> 'slogan', 'honoraires', v_plan -> 'honoraires',
-      'signature', v_plan -> 'signature', 'publications', coalesce(v_plan -> 'publications', '[]'::jsonb)),
+      'signature', v_plan -> 'signature',
+      -- Publications sans les champs internes (consignes, responsable).
+      'publications', (select coalesce(jsonb_agg(x - 'consignes' - 'responsable' - 'visuelPret'), '[]'::jsonb)
+                       from jsonb_array_elements(coalesce(v_plan -> 'publications', '[]'::jsonb)) x)),
     'expire_le', v.expire_le
   );
 end;

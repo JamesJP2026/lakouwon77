@@ -349,6 +349,24 @@ body.portail{background:var(--paper);}
 .web-box p, .web-box div{margin:6px 0;}
 .sources-pres{font-size:11px;}
 
+/* Plan d'exécution interne */
+.exec-semaine{font-size:17px; margin:4px 0 12px; text-transform:none;}
+.exec-jour h3{display:flex; gap:8px; align-items:center;}
+.exec-jour.auj{border-color:var(--gold); box-shadow:0 0 0 2px var(--gold-light);}
+.retard-panel{border-color:#f0cfcb; background:#fffafa;}
+.exec-carte{border:1px solid var(--line); border-left:4px solid var(--blue); border-radius:8px; padding:10px 12px; margin-bottom:10px; background:#fff; break-inside:avoid;}
+.exec-carte.prep{border-left-color:var(--amber);}
+.exec-carte.action{border-left-color:var(--ink-soft); background:#fbfaf6;}
+.exec-carte.fait{border-left-color:var(--green); opacity:.75;}
+.exec-carte.retard{border-left-color:var(--red);}
+.exec-tete{display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; margin-bottom:4px;}
+.exec-heure{font-family:'Manrope'; font-weight:800; background:var(--navy); color:#fff; border-radius:5px; padding:1px 7px; font-size:12.5px;}
+.exec-titre{font-weight:700; margin:4px 0;}
+.exec-texte{white-space:normal; background:var(--paper); border-radius:6px; padding:8px 10px; margin:6px 0; font-size:13px;}
+.exec-consignes{background:var(--amber-bg); border-radius:6px; padding:6px 10px; margin:6px 0; font-size:12.5px;}
+.exec-alerte{color:var(--red); font-size:12.5px; font-weight:600; margin:4px 0;}
+.exec-coche{margin-top:6px; font-size:12px;}
+
 /* Filtres */
 .filters{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
 .filters input{flex:1; min-width:200px;}

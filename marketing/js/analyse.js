@@ -2,6 +2,7 @@
 // calcul des résultats réels (dépenses, prospects, ventes, ROI).
 import { num, todayISO } from './store.js';
 import { completude, ageRechercheWeb } from './fiche.js';
+import { normaliserPublication } from './calendrier.js';
 
 const rempli = s => String(s ?? '').trim().length > 0;
 const chiffre = s => /\d/.test(String(s ?? ''));
@@ -15,7 +16,7 @@ export function normaliserPlan(p) {
   if (p.bilan === undefined) p.bilan = '';
   if (p.motif === undefined) p.motif = '';
   if (p.motifDetail === undefined) p.motifDetail = '';
-  if (!Array.isArray(p.publications)) p.publications = [];
+  p.publications = (Array.isArray(p.publications) ? p.publications : []).map(x => ('consignes' in x ? x : normaliserPublication(x)));
   if (!Array.isArray(p.releves)) p.releves = [];
   if (p.afficherResultats === undefined) p.afficherResultats = false;
   return p;

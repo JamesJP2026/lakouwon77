@@ -14,6 +14,8 @@ export const defaultData = () => ({
     paiement: { moncash: '', natcash: '', banque: '', lien: '' },
     // Coût interne d'une heure de travail (salaires, charges), pour calculer la rentabilité.
     coutHoraire: 0,
+    // Nombre de jours avant une publication où son visuel doit être prêt.
+    delaiPreparation: 2,
     // Prestations courantes, ajoutées en un clic dans les honoraires d'un plan.
     catalogue: [
       { description: 'Élaboration de la stratégie et du plan marketing', pu: 0 },
