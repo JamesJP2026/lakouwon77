@@ -16,6 +16,7 @@ export function normaliserPlan(p) {
   if (p.motif === undefined) p.motif = '';
   if (p.motifDetail === undefined) p.motifDetail = '';
   if (!Array.isArray(p.publications)) p.publications = [];
+  if (!Array.isArray(p.releves)) p.releves = [];
   if (p.afficherResultats === undefined) p.afficherResultats = false;
   return p;
 }

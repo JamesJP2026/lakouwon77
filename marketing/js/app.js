@@ -4,6 +4,7 @@ import {
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
 import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
+import { histogramme } from './graphiques.js';
 import { STATUTS_PUB, nouvellePublication, grilleMois, moisDecale, libelleMois, abregeCanal } from './calendrier.js';
 import { FREQUENCES, dateSuivante, genererRecurrentes, relancesAFaire } from './facturation.js';
 import { rechercherEntreprise, fusionnerResultat, genererSection, genererLibre, schema } from './ia.js';
@@ -763,6 +764,16 @@ function stepContent(p, step) {
           <td>${inp(`objectifs.${i}.actuel`, o.actuel)}</td>
           <td><div class="prog-in"><input type="range" min="0" max="100" step="5" data-bind="objectifs.${i}.progression" data-type="num" value="${num(o.progression)}"><b data-live="prog-${i}">${num(o.progression)} %</b></div></td></tr>`).join('')}</tbody>
       </table></div>` : ''}
+      <h4>Relevés mensuels <span class="n muted">pour les rapports mensuels au client</span></h4>
+      <div class="table-wrap flat"><table class="edit">
+        <thead><tr><th style="width:140px">Mois</th><th>Dépensé</th><th>Personnes touchées</th><th>Prospects</th><th>Ventes</th><th></th></tr></thead>
+        <tbody>${p.releves.map((r, i) => `<tr><td><input type="month" data-bind="releves.${i}.mois" value="${esc(r.mois)}"></td>
+          <td>${numInp(`releves.${i}.depense`, r.depense)}</td><td>${numInp(`releves.${i}.portee`, r.portee)}</td><td>${numInp(`releves.${i}.prospects`, r.prospects)}</td><td>${numInp(`releves.${i}.ventes`, r.ventes)}</td>
+          <td class="nowrap"><a class="btn btn-sm btn-gold" href="#/plan/${p.id}/rapport/${esc(r.mois)}">Rapport</a> <button class="btn btn-sm btn-danger" data-action="del-row" data-list="releves" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucun relevé. Ajoutez le mois écoulé pour suivre l\'évolution et produire le rapport mensuel.</td></tr>'}</tbody>
+      </table></div>
+      <button class="btn btn-sm" data-action="releve-ajouter">+ Ajouter un mois</button>
+      <span class="muted">Le nouveau mois est pré-rempli avec les résultats cumulés des actions, moins les mois déjà relevés.</span>
+      <div data-live="graphs">${graphiquesReleves(p)}</div>
       <h4>Recommandations</h4>
       <div data-live="resRecos">${recosHtml(p)}</div>
       <div class="form-grid" style="margin-top:16px">
@@ -953,7 +964,7 @@ function updateLive(p) {
   p.honoraires.forEach((l, i) => set(`hon-${i}`, money(num(l.qte) * num(l.pu))));
   p.objectifs.forEach((o, i) => set(`prog-${i}`, `${num(o.progression)} %`));
   set('score', scorePanel(p));
-  if (document.querySelector('[data-live="resKpi"]')) { set('resKpi', resultatsKpi(p)); set('resRecos', recosHtml(p)); }
+  if (document.querySelector('[data-live="resKpi"]')) { set('resKpi', resultatsKpi(p)); set('resRecos', recosHtml(p)); set('graphs', graphiquesReleves(p)); }
 }
 
 // Durée réelle de la campagne en mois (au moins 1).
@@ -1119,6 +1130,93 @@ function initSignature() {
   cv.addEventListener('pointerdown', e => { dessine = true; cv.dataset.vide = 'non'; cv.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); });
   cv.addEventListener('pointermove', e => { if (!dessine) return; ctx.lineTo(...pos(e)); ctx.stroke(); });
   ['pointerup', 'pointercancel'].forEach(t => cv.addEventListener(t, () => { dessine = false; }));
+}
+
+// ---------- Relevés et rapport mensuel ----------
+const releveTries = p => [...p.releves].filter(r => r.mois).sort((a, b) => a.mois.localeCompare(b.mois));
+const moisCourt = m => new Date(m + '-01T00:00:00').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }).replace('.', '');
+const nombreCourt = n => n >= 1e6 ? fmt(n / 1e6).replace(/,00$/, '') + ' M' : n >= 1e3 ? Math.round(n / 1e3) + ' k' : String(Math.round(n));
+
+function graphiquesReleves(p, jusqua) {
+  const rel = releveTries(p).filter(r => !jusqua || r.mois <= jusqua).slice(-12);
+  if (!rel.length) return '';
+  const et = rel.map(r => moisCourt(r.mois));
+  return `<div class="graphs">
+    ${histogramme({ titre: `Dépenses et ventes par mois (${data.settings.devise})`, etiquettes: et, format: v => nombreCourt(v),
+      series: [{ nom: 'Dépensé', valeurs: rel.map(r => num(r.depense)) }, { nom: 'Ventes générées', valeurs: rel.map(r => num(r.ventes)) }] })}
+    ${histogramme({ titre: 'Prospects par mois', etiquettes: et, format: v => nombreCourt(v), series: [{ nom: 'Prospects', valeurs: rel.map(r => num(r.prospects)) }] })}
+  </div>`;
+}
+
+function nouveauReleve(p) {
+  const rel = releveTries(p);
+  const dernier = rel.at(-1)?.mois;
+  const mois = dernier ? moisDecale(dernier, 1) : moisDecale(todayISO().slice(0, 7), -1) < p.debut.slice(0, 7) ? p.debut.slice(0, 7) : moisDecale(todayISO().slice(0, 7), -1);
+  const r = resultats(p);
+  const deja = k => rel.reduce((s, x) => s + num(x[k]), 0);
+  const reste = (tot, k) => Math.max(0, tot - deja(k));
+  return { mois, depense: reste(r.depense, 'depense'), portee: reste(r.portee, 'portee'), prospects: reste(r.prospects, 'prospects'), ventes: reste(r.ventes, 'ventes'), commentaire: '' };
+}
+
+function variation(v, avant) {
+  if (avant === undefined || !num(avant)) return '';
+  const pct = (num(v) - num(avant)) / num(avant) * 100;
+  return `<span class="var">${pct >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(pct))} % vs mois précédent</span>`;
+}
+
+function viewRapport(p, mois) {
+  const s = data.settings, c = clientById(p.clientId) || {};
+  const rel = releveTries(p);
+  const i = rel.findIndex(r => r.mois === mois);
+  const r = rel[i];
+  if (!r) return topbar('Rapport mensuel', 'Relevé introuvable.', `<a class="btn" href="#/plan/${p.id}/resultats">← Retour</a>`);
+  const av = rel[i - 1] || {};
+  const cpp = num(r.prospects) ? num(r.depense) / num(r.prospects) : 0;
+  const roi = num(r.depense) ? (num(r.ventes) - num(r.depense)) / num(r.depense) * 100 : null;
+  const pubs = p.publications.filter(x => x.date.startsWith(mois));
+  const publiees = pubs.filter(x => x.statut === 'publie');
+  const tuile = (l, v, extra = '') => `<div><span>${l}</span><b>${v}</b>${extra}</div>`;
+  return topbar('Rapport mensuel', `${esc(c.nom || '')} · ${esc(p.titre)}`, `
+    <a class="btn" href="#/plan/${p.id}/resultats">← Résultats</a>
+    <button class="btn btn-ia" data-action="ia-commentaire" data-mois="${esc(mois)}">✨ Rédiger le commentaire</button>
+    <button class="btn" data-action="rapport-partager" data-mois="${esc(mois)}">✉ Envoyer le résumé</button>
+    <button class="btn btn-primary" data-action="print">🖨 Imprimer / PDF</button>`) + `
+  <article class="doc rapport">
+    <header class="rapport-head">
+      <div class="cover-top">${s.logo ? `<img src="${esc(s.logo)}" alt="" class="doc-logo">` : ''}<div><b>${esc(s.nom)}</b><div class="muted">${esc([s.telephone, s.email].filter(Boolean).join(' · '))}</div></div></div>
+      <div class="cover-kicker">Rapport mensuel</div>
+      <h1>${esc(libelleMois(mois))}</h1>
+      <div class="cover-client">${esc(c.nom || '')} — ${esc(p.titre)}</div>
+    </header>
+    <section class="doc-section"><h2><span>1</span>Chiffres du mois</h2>
+      <div class="res-grid">
+        ${tuile('Budget dépensé', money(r.depense), variation(r.depense, av.depense))}
+        ${tuile('Personnes touchées', fmt(r.portee).replace(/,00$/, ''), variation(r.portee, av.portee))}
+        ${tuile('Prospects', fmt(r.prospects).replace(/,00$/, ''), variation(r.prospects, av.prospects))}
+        ${tuile('Ventes générées', money(r.ventes), variation(r.ventes, av.ventes))}
+        ${tuile('Coût par prospect', cpp ? money(cpp) : '—')}
+      </div>
+      ${roi !== null ? `<p>Retour sur investissement du mois : <b>${Math.round(roi)} %</b> (ventes − dépenses) / dépenses.</p>` : ''}
+    </section>
+    ${rel.length > 1 ? `<section class="doc-section"><h2><span>2</span>Évolution</h2>${graphiquesReleves(p, mois)}</section>` : ''}
+    <section class="doc-section"><h2><span>${rel.length > 1 ? 3 : 2}</span>Ce qui a été réalisé</h2>
+      ${pubs.length ? `<p><b>${publiees.length}</b> publication(s) publiée(s) sur ${pubs.length} prévue(s) ce mois-ci.</p>
+        ${publiees.length ? `<table class="doc-table"><thead><tr><th>Date</th><th>Réseau</th><th>Publication</th></tr></thead><tbody>${publiees.map(x => `<tr><td class="nowrap">${dateCourte(x.date)}</td><td>${esc(x.canal)}</td><td>${esc(x.titre || x.texte.slice(0, 80))}</td></tr>`).join('')}</tbody></table>` : ''}` : ''}
+      <table class="doc-table"><thead><tr><th>Action</th><th>Statut</th></tr></thead><tbody>${p.actions.map(a => `<tr><td><b>${esc(a.canal)}</b> — ${esc(a.action)}</td><td>${STATUTS_ACTION[a.statut] || ''}</td></tr>`).join('')}</tbody></table>
+      ${p.objectifs.length ? `<h4>Avancement des objectifs</h4><div class="bars">${p.objectifs.map(o => `<div class="bar-row"><span class="bar-lbl">${esc(o.objectif)}</span><span class="bar"><i style="width:${Math.min(100, num(o.progression))}%"></i></span><span class="bar-val num">${Math.round(num(o.progression))} %</span></div>`).join('')}</div>` : ''}
+    </section>
+    <section class="doc-section"><h2><span>✓</span>Commentaire et prochaines étapes</h2>
+      <textarea class="no-print" data-releve-commentaire="${esc(mois)}" rows="5" placeholder="Ce qui a bien marché, ce qui sera ajusté le mois prochain…">${esc(r.commentaire || '')}</textarea>
+      <div class="print-only">${r.commentaire ? `<p>${nl2br(r.commentaire)}</p>` : ''}</div>
+    </section>
+    <footer class="doc-foot">${esc(s.nom)}${s.telephone ? ` · ${esc(s.telephone)}` : ''}${s.email ? ` · ${esc(s.email)}` : ''}</footer>
+  </article>`;
+}
+
+function texteResumeRapport(p, mois) {
+  const c = clientById(p.clientId) || {};
+  const r = releveTries(p).find(x => x.mois === mois);
+  return `Bonjour${c.contact ? ' ' + c.contact : ''},\n\nVoici le bilan de ${libelleMois(mois)} pour « ${p.titre} » :\n- Budget dépensé : ${money(r.depense)}\n- Personnes touchées : ${fmt(r.portee).replace(/,00$/, '')}\n- Prospects : ${fmt(r.prospects).replace(/,00$/, '')}\n- Ventes générées : ${money(r.ventes)}\n${r.commentaire ? `\n${r.commentaire}\n` : ''}\nLe rapport complet est joint en PDF.\n\n${data.settings.nom}`;
 }
 
 function rapportResultats(p) {
@@ -1466,7 +1564,7 @@ function render() {
   else if (route === 'plans') { html = viewPlans(); if (id === 'nouveau') setTimeout(() => modalNouveauPlan(), 0); }
   else if (route === 'plan' && planById(id)) {
     const p = normaliserPlan(planById(id)); nav = 'plans'; current.plan = p;
-    html = sub === 'presentation' ? viewPresentation(p) : viewPlanEditor(p, sub || 'infos');
+    html = sub === 'presentation' ? viewPresentation(p) : sub === 'rapport' ? viewRapport(p, parts[3]) : viewPlanEditor(p, sub || 'infos');
   }
   else if (route === 'actions') { data.plans.forEach(normaliserPlan); html = viewActions(); }
   else if (route === 'factures') html = viewFactures();
@@ -1589,6 +1687,36 @@ document.addEventListener('click', e => {
       break;
     }
     case 'cal-imprimer': imprimerCalendrier(p); break;
+    case 'releve-ajouter': {
+      const r = nouveauReleve(p);
+      if (p.releves.some(x => x.mois === r.mois)) { toast('Ce mois est déjà relevé.', 'err'); break; }
+      p.releves.push(r); persist(true); rerenderKeepScroll(); toast(`Relevé de ${libelleMois(r.mois)} ajouté : vérifiez les chiffres.`);
+      break;
+    }
+    case 'rapport-partager': {
+      const c = clientById(p.clientId) || {};
+      const tel = String(c.telephone || '').replace(/\D/g, '');
+      const txt = texteResumeRapport(p, el.dataset.mois);
+      openModal(`<h2>Envoyer le résumé du mois</h2><textarea id="relance-msg" rows="12">${esc(txt)}</textarea>
+        <p class="muted">Imprimez d'abord le rapport en PDF pour le joindre au message.</p>
+        <div class="modal-actions wrap"><button type="button" class="btn" data-action="copier-relance">Copier</button>
+        ${c.email ? `<a class="btn" data-relance="mail" data-sujet="Rapport ${esc(libelleMois(el.dataset.mois))}" href="mailto:${esc(c.email)}" target="_blank" rel="noopener">Email</a>` : ''}
+        ${tel ? `<a class="btn btn-primary" data-relance="wa" href="https://wa.me/${tel}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</div>`, true);
+      relanceCourante = null;
+      break;
+    }
+    case 'ia-commentaire': {
+      if (!demanderCle()) break;
+      const mois = el.dataset.mois;
+      avecProgression('Rédaction du commentaire du mois…', signal => genererLibre(data.settings.cleApi,
+        `Rédige le commentaire du rapport mensuel de ${libelleMois(mois)} pour le client : lecture des chiffres du mois (relevé : ${JSON.stringify(releveTries(p).filter(r => r.mois <= mois).slice(-3))}), ce qui a bien fonctionné, ce qui sera ajusté, et les prochaines étapes. 5 à 8 phrases, ton professionnel et positif, sans inventer de chiffres.`,
+        contexteIA(p), { commentaire: S.texte('Commentaire du mois.') }, signal, 'low')).then(res => {
+        if (!res) return;
+        const r = p.releves.find(x => x.mois === mois);
+        r.commentaire = res.donnees.commentaire; persist(true); closeModal(); render(); toast(`Commentaire rédigé (coût estimé ${usd(res.cout)}). Relisez-le.`);
+      });
+      break;
+    }
     case 'sig-vider': { const cv = document.getElementById('sig-pad'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); delete cv.dataset.vide; break; }
     case 'sig-valider': {
       const cv = document.getElementById('sig-pad');
@@ -1744,6 +1872,11 @@ function handleForm(form) {
 
 function onInput(e) {
   const el = e.target;
+  if (el.dataset.releveCommentaire && current.plan) {
+    const r = current.plan.releves.find(x => x.mois === el.dataset.releveCommentaire);
+    if (r) { r.commentaire = el.value; persist(); }
+    return;
+  }
   if (el.dataset.filter) {
     const [liste, cle] = el.dataset.filter.split('.');
     filtres[liste][cle] = el.value;
@@ -1811,6 +1944,19 @@ document.addEventListener('change', e => {
     };
     r.readAsText(el.files[0]);
   }
+});
+
+// Infobulle des graphiques (attribut data-tip).
+const bulle = document.createElement('div');
+bulle.className = 'g-bulle';
+document.body.appendChild(bulle);
+document.addEventListener('mousemove', e => {
+  const t = e.target.closest?.('[data-tip]');
+  if (!t) { bulle.style.display = 'none'; return; }
+  bulle.textContent = t.dataset.tip;
+  bulle.style.display = 'block';
+  bulle.style.left = Math.min(window.innerWidth - bulle.offsetWidth - 8, e.clientX + 12) + 'px';
+  bulle.style.top = (e.clientY - 34) + 'px';
 });
 
 // Glisser-déposer des publications dans le calendrier.
