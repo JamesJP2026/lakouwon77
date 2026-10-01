@@ -3,7 +3,7 @@ import {
   dateFr, dateCourte, totauxFacture, budgetActions, totalHonoraires,
 } from './store.js';
 import { SECTEURS, CANAUX, MOTIFS, suggestions } from './secteurs.js';
-import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte } from './fiche.js';
+import { PLATEFORMES, CHAMPS_LABELS, SUPPORTS, DECOUVERTE, normaliserFiche, completude, liensRecherche, diagnostic, appliquerFiche, texteContexte, texteWebIA, ageRechercheWeb } from './fiche.js';
 import { histogramme } from './graphiques.js';
 import { sync } from './sync.js';
 import { MODELES, appliquerModele } from './modeles.js';
@@ -276,6 +276,24 @@ function diagHtml(c) {
   return `<ul class="recos">${d.map(x => `<li class="${TYPES_CONSTAT[x.type][1]}"><b>${TYPES_CONSTAT[x.type][0]} :</b> ${esc(x.texte)}${x.action ? `<div class="muted">→ Action proposée : ${esc(x.action.action)}</div>` : ''}</li>`).join('')}</ul>`;
 }
 
+// Ce que la dernière recherche sur internet a trouvé, tel quel.
+function blocWeb(c) {
+  const w = c.fiche.web?.donnees;
+  if (!w) return '';
+  const age = ageRechercheWeb(c);
+  const ligne = (l, v) => v && String(v).trim() ? `<div><b>${l} :</b> ${nl2br(v)}</div>` : '';
+  return `<details class="web-box" ${age < 2 ? 'open' : ''}>
+    <summary>🌐 Trouvé sur internet le ${dateCourte(c.fiche.web.date)}${age > 60 ? ' <span class="txt-red">(à mettre à jour)</span>' : ''}</summary>
+    ${w.resume ? `<p>${nl2br(w.resume)}</p>` : ''}
+    ${ligne('Produits / services', w.activite?.produits)}${ligne('Prix publiés', w.activite?.prix)}${ligne('Zone', w.activite?.zone)}
+    ${ligne('Concurrents', w.concurrents)}${ligne('Mis en avant', w.avantage)}${ligne('Avis des clients', w.avis_clients)}
+    ${w.remarques ? `<p class="muted">À vérifier : ${esc(w.remarques)}</p>` : ''}
+    ${w.sources?.length ? `<div class="muted">Sources : ${w.sources.map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.titre || x.url)}</a>`).join(' · ')}</div>` : ''}
+    <div class="row-btns mt"><button class="btn btn-sm" data-action="web-reprendre" data-id="${c.id}">Reprendre tout dans la fiche (remplace)</button>
+      <span class="muted">Ces informations sont aussi transmises à l'IA quand elle rédige le plan.</span></div>
+  </details>`;
+}
+
 function updateLiveFiche(c) {
   const set = (k, html) => document.querySelectorAll(`[data-live="${k}"]`).forEach(el => { el.innerHTML = html; });
   const pct = completude(c);
@@ -308,6 +326,7 @@ function viewFiche(c) {
           <div><b>Recherche automatique par IA</b><div class="muted">L'IA cherche l'entreprise sur le web (site, réseaux sociaux, avis, application, presse) et remplit la fiche. Vous vérifiez ensuite.</div></div>
           <button class="btn btn-primary" data-action="ia-recherche" data-id="${c.id}">🤖 Rechercher avec l'IA</button>
         </div>
+        ${blocWeb(c)}
         <div class="row-btns">${liensRecherche(c).map(([l, u]) => `<a class="btn btn-sm" href="${esc(u)}" target="_blank" rel="noopener">🔎 ${l}</a>`).join('')}</div>
         ${q('Ce que vous avez trouvé en ligne', ca('fiche.recherche', f.recherche, 'Ex. : page Facebook active depuis 2019, beaucoup de commentaires sur la rapidité du service, 2 avis négatifs sur l\'attente, article dans Le Nouvelliste en 2023…', 3), 'mt')}
       </div>
@@ -422,6 +441,9 @@ function contexteIA(p) {
     `Entreprise : ${c.nom} — secteur : ${secteurLabel(c.secteur)}${c.adresse ? ` — ${c.adresse}` : ''}`,
     `Devise : ${data.settings.devise}. Date du jour : ${todayISO()}.`,
     c.fiche && `Fiche entreprise :\n${texteContexte(c)}`,
+    c.fiche?.concurrence?.concurrents?.trim() && `Concurrents connus de l'agence : ${c.fiche.concurrence.concurrents.trim()}`,
+    c.fiche?.concurrence?.problemes?.trim() && `Problèmes signalés par l'entreprise : ${c.fiche.concurrence.problemes.trim()}`,
+    c.fiche && texteWebIA(c) && `Informations publiques trouvées sur internet (à utiliser, sans les présenter comme vérifiées si elles sont marquées comme douteuses) :\n${texteWebIA(c)}`,
     c.fiche && `Diagnostic :\n${diagnostic(c).map(d => `- [${d.type}] ${d.texte}`).join('\n')}`,
     `Canaux disponibles : ${CANAUX.join(', ')}.`,
     r.aDesDonnees && `Résultats réels : dépensé ${r.depense}, prospects ${r.prospects}, ventes ${r.ventes}, ROI ${Math.round(r.roi)} %.`,
@@ -430,6 +452,7 @@ function contexteIA(p) {
 }
 
 let proposition = null;
+let rechercheEnAttente = null;
 
 function apercuValeur(v) {
   if (Array.isArray(v)) {
@@ -443,8 +466,31 @@ function apercuValeur(v) {
 
 const LIBELLES_IA = { resume: 'Résumé', contexte: 'Situation actuelle', concurrents: 'Marché et concurrence', forces: 'Forces', faiblesses: 'Faiblesses', opportunites: 'Opportunités', menaces: 'Menaces', objectifs: 'Objectifs', cibles: 'Cibles', positionnement: 'Positionnement', messageCle: 'Message clé', slogans: 'Slogans proposés', ton: 'Ton', produit: 'Produit', prix: 'Prix', distribution: 'Distribution', promotion: 'Communication', actions: 'Actions', kpis: 'Indicateurs', suivi: 'Suivi', risques: 'Risques', bilan: 'Bilan', objectif: 'Objectif', indicateur: 'Indicateur', cible: 'Cible', echeance: 'Échéance', nom: 'Nom', description: 'Description', besoins: 'Besoins', canaux: 'Canaux', canal: 'Canal', action: 'Action', budget: 'Budget', debut: 'Début', fin: 'Fin' };
 
-async function proposerSection(p, section) {
+// Recherche sur internet avec la fenêtre d'attente standard ; complète la fiche. Retourne true si faite.
+async function rechercheWebAvant(c) {
+  const res = await avecProgression(`Recherche de « ${esc(c.nom)} » sur internet (site, réseaux sociaux, avis, presse)… 1 à 3 minutes.`,
+    signal => rechercherEntreprise({ ...c, secteurLabel: secteurLabel(c.secteur) }, data.settings.cleApi, signal));
+  if (!res) return false;
+  if (res.donnees.entreprise_trouvee) {
+    const modifs = fusionnerResultat(c, res.donnees, false);
+    c.fiche.majLe = todayISO(); persist(true);
+    toast(`Infos trouvées sur internet : ${modifs.length} champ(s) de la fiche complété(s) (coût estimé ${usd(res.cout)}).`);
+  } else toast('Aucune source fiable trouvée sur internet pour cette entreprise.', 'err');
+  return true;
+}
+
+async function proposerSection(p, section, sansRecherche = false) {
   if (!demanderCle()) return;
+  const c = clientById(p.clientId);
+  if (section === 'tout' && !sansRecherche && c && ageRechercheWeb(c) > 60) {
+    rechercheEnAttente = { p };
+    openModal(`<h2>Rechercher d'abord l'entreprise sur internet ?</h2>
+      <p>${ageRechercheWeb(c) === Infinity ? 'L\'entreprise n\'a pas encore été recherchée sur internet.' : `La dernière recherche date de ${ageRechercheWeb(c)} jours.`} Une recherche préalable permet à l'IA de s'appuyer sur ce qui existe déjà en ligne : site, réseaux sociaux, avis des clients, concurrents.</p>
+      <div class="modal-actions wrap"><button type="button" class="btn" data-action="close-modal">Annuler</button>
+        <button type="button" class="btn" data-action="ia-tout-direct">Rédiger sans recherche</button>
+        <button type="button" class="btn btn-primary" data-action="ia-tout-recherche">🌐 Rechercher puis rédiger</button></div>`, true);
+    return;
+  }
   const res = await avecProgression(section === 'tout' ? 'Rédaction du brouillon complet du plan…' : 'Rédaction de propositions pour cette étape…',
     signal => genererSection(data.settings.cleApi, section, contexteIA(p), signal));
   if (!res) return;
@@ -615,6 +661,7 @@ function modalNouveauPlan(clientId = '') {
         <label>Fin<input type="date" name="fin" value="${addMonths(debut, 6)}" required></label>
         <label class="full">Budget publicitaire envisagé (${esc(data.settings.devise)})<input name="budgetPrevu" type="number" min="0" step="any" value="0"></label>
         <label class="full check"><input type="checkbox" name="prefill" checked> Pré-remplir avec des suggestions adaptées au secteur (modifiables)</label>
+        ${data.settings.cleApi ? `<label class="full check"><input type="checkbox" name="rechercheWeb" ${ageRechercheWeb(clientById(clientId) || data.clients[0]) > 60 ? 'checked' : ''}> 🌐 Rechercher d'abord l'entreprise sur internet (IA) pour adapter le plan à ce qui existe déjà en ligne</label>` : ''}
       </div>
       <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="submit-form">Créer le plan</button></div>
     </form>`, true);
@@ -1042,7 +1089,7 @@ function viewPresentation(p) {
     ${section(++n, 'Raison du plan et résumé', `${p.motif || p.motifDetail ? `<div class="motif-box"><b>${esc(p.motif === 'autre' ? 'Raison du plan' : motifLabel(p) || 'Raison du plan')}</b>${p.motifDetail ? `<p>${nl2br(p.motifDetail)}</p>` : ''}</div>` : ''}
       ${p.resume ? `<p class="lead">${nl2br(p.resume)}</p>` : p.motif ? '' : '<p class="muted">—</p>'}`)}
 
-    ${section(++n, 'Analyse de la situation', para('Situation actuelle', p.contexte) + para('Marché et concurrence', p.concurrents) + presenceEnLigne(c) + `
+    ${section(++n, 'Analyse de la situation', para('Situation actuelle', p.contexte) + para('Marché et concurrence', p.concurrents) + presenceEnLigne(c) + reputationEnLigne(c) + `
       <div class="swot">
         <div class="sw-f"><h4>Forces</h4>${liste(p.swot.forces)}</div>
         <div class="sw-w"><h4>Faiblesses</h4>${liste(p.swot.faiblesses)}</div>
@@ -1231,6 +1278,15 @@ function texteResumeRapport(p, mois) {
   const c = clientById(p.clientId) || {};
   const r = releveTries(p).find(x => x.mois === mois);
   return `Bonjour${c.contact ? ' ' + c.contact : ''},\n\nVoici le bilan de ${libelleMois(mois)} pour « ${p.titre} » :\n- Budget dépensé : ${money(r.depense)}\n- Personnes touchées : ${fmt(r.portee).replace(/,00$/, '')}\n- Prospects : ${fmt(r.prospects).replace(/,00$/, '')}\n- Ventes générées : ${money(r.ventes)}\n${r.commentaire ? `\n${r.commentaire}\n` : ''}\nLe rapport complet est joint en PDF.\n\n${data.settings.nom}`;
+}
+
+// Avis et sources publiques (si l'entreprise a été recherchée sur internet).
+function reputationEnLigne(c) {
+  const w = c.fiche?.web?.donnees;
+  const avis = c.fiche?.bases?.avisClients || w?.avis_clients;
+  if (!avis && !w?.sources?.length) return '';
+  return `<div class="para">${avis ? `<h4>Ce que disent les clients en ligne</h4><p>${nl2br(avis)}</p>` : ''}
+    ${w?.sources?.length ? `<p class="muted sources-pres">Sources publiques consultées le ${dateCourte(c.fiche.web.date)} : ${w.sources.map(x => esc(x.titre || x.url)).join(' · ')}</p>` : ''}</div>`;
 }
 
 function rapportResultats(p) {
@@ -1900,6 +1956,18 @@ document.addEventListener('click', e => {
     case 'ia-lancer': lancerRechercheIA(clientById(id), $modal.querySelector('[name=remplacer]')?.checked); break;
     case 'ia-annuler': rechercheEnCours?.abort(); break;
     case 'ia-section': proposerSection(p, el.dataset.section); break;
+    case 'ia-tout-direct': if (rechercheEnAttente) proposerSection(rechercheEnAttente.p, 'tout', true); break;
+    case 'ia-tout-recherche': {
+      const pl = rechercheEnAttente?.p; if (!pl) break;
+      rechercheWebAvant(clientById(pl.clientId)).then(ok => { if (ok) proposerSection(pl, 'tout', true); });
+      break;
+    }
+    case 'web-reprendre': {
+      const c = clientById(id);
+      const modifs = fusionnerResultat(c, c.fiche.web.donnees, true);
+      persist(true); render(); toast(`${modifs.length} champ(s) de la fiche mis à jour avec les infos trouvées sur internet.`);
+      break;
+    }
     case 'cal-mois': calMois[p.id] = moisDecale(calMois[p.id], +el.dataset.delta); rerenderKeepScroll(); break;
     case 'pub-nouvelle': modalPublication(p, nouvellePublication({ date: el.dataset.date || todayISO(), statut: 'brouillon' })); break;
     case 'pub-ouvrir': { const pub = p.publications.find(x => x.id === el.dataset.pid); if (pub) modalPublication(p, pub); break; }
@@ -2127,8 +2195,9 @@ function handleForm(form) {
   } else if (kind === 'plan') {
     if (fd.motif === 'autre' && !fd.motifDetail.trim()) { toast('Précisez la raison du plan.', 'err'); form.querySelector('[name=motifDetail]').focus(); return; }
     if (fd.fin < fd.debut) { toast('La date de fin doit être après la date de début.', 'err'); return; }
-    const p = nouveauPlan({ ...fd, prefill: !!fd.prefill });
-    data.plans.push(p); persist(true); closeModal(); go(`#/plan/${p.id}/infos`);
+    const creer = () => { const p = nouveauPlan({ ...fd, prefill: !!fd.prefill }); data.plans.push(p); persist(true); closeModal(); go(`#/plan/${p.id}/infos`); };
+    if (fd.rechercheWeb && data.settings.cleApi) rechercheWebAvant(normaliserFiche(clientById(fd.clientId))).then(ok => { creer(); if (!ok) toast('Recherche sur internet interrompue : plan créé sans ces informations.', 'err'); });
+    else creer();
   } else if (kind === 'gen-facture') {
     if (!fd.honoraires && !fd.media) { toast('Cochez au moins un élément à facturer.', 'err'); return; }
     const f = creerFacture(planById(form.dataset.id), { honoraires: !!fd.honoraires, media: !!fd.media, mediaDetail: !!fd.mediaDetail, type: fd.type, acomptePct: fd.acomptePct, date: fd.date, delai: fd.delai });

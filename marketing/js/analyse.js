@@ -1,7 +1,7 @@
 // Analyse d'un plan : score de qualité, conseils pour l'améliorer, et
 // calcul des résultats réels (dépenses, prospects, ventes, ROI).
 import { num, todayISO } from './store.js';
-import { completude } from './fiche.js';
+import { completude, ageRechercheWeb } from './fiche.js';
 
 const rempli = s => String(s ?? '').trim().length > 0;
 const chiffre = s => /\d/.test(String(s ?? ''));
@@ -30,6 +30,7 @@ export function scorePlan(p, client) {
   const budget = p.actions.reduce((s, a) => s + num(a.budget), 0);
 
   if (client?.fiche) add(completude(client) >= 50, 'Complétez la fiche entreprise (activité, clientèle, présence en ligne) pour mieux adapter le plan.', 'fiche', 2);
+  if (client?.fiche) add(ageRechercheWeb(client) <= 180 || rempli(client.fiche.recherche), 'Recherchez l\'entreprise sur internet (bouton « Rechercher avec l\'IA » ou 🔎 de la fiche) pour tenir compte de ce qui existe déjà en ligne.', 'fiche');
   add(rempli(p.motif) && (p.motif !== 'autre' || rempli(p.motifDetail)), 'Indiquez le motif du plan : pourquoi l\'entreprise a besoin de ce plan.', 'infos', 2);
   add(rempli(p.resume), 'Rédigez un résumé : c\'est la première chose que lira le client.', 'infos');
   add(rempli(p.contexte), 'Décrivez la situation actuelle de l\'entreprise.', 'analyse');

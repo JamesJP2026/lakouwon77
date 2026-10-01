@@ -162,10 +162,10 @@ export function fusionnerResultat(c, d, remplacer = false) {
     poser(f.enLigne[p.k], 'url', src.url, `${p.label} : lien`);
     p.champs.forEach(ch => poser(f.enLigne[p.k], ch, src[ch], `${p.label} : ${CHAMPS_LABELS[ch].toLowerCase()}`));
   });
-  const date = new Date().toLocaleDateString('fr-FR');
-  const bloc = [`Recherche IA du ${date} : ${d.resume}`, d.remarques && `Remarques : ${d.remarques}`,
-    d.sources.length && `Sources :\n${d.sources.map(s => `- ${s.titre} — ${s.url}`).join('\n')}`].filter(Boolean).join('\n');
-  f.recherche = [f.recherche, bloc].filter(s => s && s.trim()).join('\n\n');
+  // Tout ce qui a été trouvé est conservé tel quel (même ce qui n'a pas pu entrer dans
+  // une case déjà remplie), pour l'IA, la fiche et la présentation au client.
+  const d0 = new Date();
+  f.web = { date: `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}-${String(d0.getDate()).padStart(2, '0')}`, donnees: d };
   return modifs;
 }
 

@@ -34,6 +34,7 @@ export function ficheVide() {
     bases: { contactsClients: '', emails: '', avisClients: '', meilleuresPubs: '' },
     moyens: { budgetMensuel: '', gestionnaire: '', supports: {} },
     recherche: '', majLe: '',
+    web: null, // résultat complet de la dernière recherche sur internet (IA)
   };
 }
 
@@ -169,7 +170,44 @@ export function texteContexte(c) {
   if (cl.decouverte.length) l.push(`Les clients découvrent l'entreprise par : ${cl.decouverte.join(', ').toLowerCase()}.`);
   if (a.saisonnalite) l.push(`Saisonnalité : ${a.saisonnalite.trim()}.`);
   if (m.gestionnaire) l.push(`Communication actuellement gérée par : ${m.gestionnaire.trim()}.`);
-  if (c.fiche.recherche) l.push(`Informations trouvées en ligne : ${c.fiche.recherche.trim()}`);
+  const w = c.fiche.web?.donnees;
+  if (w?.resume) l.push(`D'après les informations publiques : ${w.resume.trim()}`);
+  const avis = c.fiche.bases.avisClients || w?.avis_clients;
+  if (avis) l.push(`Ce que disent les clients : ${avis.trim()}`);
+  // Notes de recherche manuelles, sans les adresses des sources (inutiles dans une présentation).
+  const notes = String(c.fiche.recherche || '').split('\n').filter(x => x.trim() && !/^(- .*https?:\/\/|sources\s*:)/i.test(x.trim())).join(' ');
+  if (notes) l.push(`Observations en ligne : ${notes}`);
+  return l.join('\n');
+}
+
+// Âge en jours de la dernière recherche sur internet (Infinity si jamais faite).
+export function ageRechercheWeb(c) {
+  const d = c.fiche?.web?.date;
+  return d ? Math.floor((Date.now() - new Date(d + 'T00:00:00')) / 86400000) : Infinity;
+}
+
+// Toutes les informations publiques trouvées, pour l'IA qui rédige le plan.
+export function texteWebIA(c) {
+  const w = c.fiche?.web?.donnees;
+  const l = [];
+  if (w) {
+    l.push(`Recherche sur internet du ${c.fiche.web.date}${w.entreprise_trouvee ? '' : ' (aucune source fiable trouvée)'} :`);
+    if (w.resume) l.push(`Résumé : ${w.resume}`);
+    const a = w.activite || {};
+    [['Activité', a.description], ['Produits / services', a.produits], ['Prix publiés', a.prix], ['Ancienneté', a.anciennete], ['Zone', a.zone],
+      ['Clientèle visée', w.clientele], ['Concurrents identifiés', w.concurrents], ['Ce que l\'entreprise met en avant', w.avantage], ['Avis des clients', w.avis_clients], ['Doutes / non vérifié', w.remarques]]
+      .forEach(([k, v]) => { if (v && String(v).trim()) l.push(`${k} : ${String(v).trim()}`); });
+    const pres = PLATEFORMES.map(p => {
+      const x = w.en_ligne?.[p.k];
+      if (!x) return '';
+      const chiffres = p.champs.filter(ch => x[ch] !== null && x[ch] !== undefined && x[ch] !== '').map(ch => `${CHAMPS_LABELS[ch].toLowerCase()} ${x[ch]}`);
+      return x.url || chiffres.length ? `${p.label}${x.url ? ` (${x.url})` : ''}${chiffres.length ? ' : ' + chiffres.join(', ') : ''}` : '';
+    }).filter(Boolean);
+    if (pres.length) l.push(`Présence en ligne : ${pres.join(' ; ')}`);
+    if (w.sources?.length) l.push(`Sources : ${w.sources.map(s => s.titre || s.url).join(' ; ')}`);
+  }
+  if (c.fiche?.recherche?.trim()) l.push(`Notes de recherche de l'agence : ${c.fiche.recherche.trim()}`);
+  if (c.fiche?.bases?.meilleuresPubs?.trim()) l.push(`Publications ou campagnes qui ont le mieux marché : ${c.fiche.bases.meilleuresPubs.trim()}`);
   return l.join('\n');
 }
 

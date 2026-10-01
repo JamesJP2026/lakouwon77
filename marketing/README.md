@@ -85,6 +85,17 @@ Recherche par IA. La clé reste dans le navigateur (appel direct à
 api.anthropic.com) et n'est jamais incluse dans les sauvegardes exportées.
 Le coût estimé est affiché après chaque recherche.
 
+**Prise en compte des informations trouvées sur internet** : le résultat
+complet de chaque recherche est conservé dans la fiche (bloc « Trouvé sur
+internet », avec les sources), même ce qui n'a pas pu entrer dans une case
+déjà remplie. Il est transmis à l'IA à chaque rédaction (résumé, concurrents,
+avis des clients, présence en ligne, points à vérifier), repris dans le
+contexte du plan (sans les adresses des sources) et affiché dans la
+présentation (avis des clients en ligne, sources consultées). Une recherche
+préalable est proposée à la création d'un plan et avant un brouillon
+complet si l'entreprise n'a pas été recherchée depuis plus de 60 jours ; le
+score du plan le rappelle aussi.
+
 Le SDK officiel `@anthropic-ai/sdk` (licence MIT) est embarqué dans
 `js/vendor/anthropic-sdk.esm.js` (assemblé avec esbuild) et chargé
 seulement au moment d'une recherche.
